@@ -1,15 +1,15 @@
-use std::collections::{HashMap};
+use std::collections::HashMap;
 
 use dashmap::DashMap;
-use nrs_language_server::chumsky::{parse, type_inference, Func, ImCompleteSemanticToken};
-use nrs_language_server::completion::completion;
-use nrs_language_server::jump_definition::{get_definition};
-use nrs_language_server::reference::get_reference;
-use nrs_language_server::semantic_token::{semantic_token_from_ast, LEGEND_TYPE};
+use jsonld_language_server::chumsky::{parse, type_inference, Func, ImCompleteSemanticToken};
+use jsonld_language_server::completion::{completion, ImCompleteCompletionItem};
+use jsonld_language_server::jump_definition::get_definition;
+use jsonld_language_server::reference::get_reference;
+use jsonld_language_server::semantic_token::{semantic_token_from_ast, LEGEND_TYPE};
 use ropey::Rope;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tower_lsp::jsonrpc::{Result};
+use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
@@ -54,7 +54,7 @@ impl LanguageServer for Backend {
                             text_document_registration_options: {
                                 TextDocumentRegistrationOptions {
                                     document_selector: Some(vec![DocumentFilter {
-                                        language: Some("nrs".to_string()),
+                                        language: Some("jsonld".to_string()),
                                         scheme: Some("file".to_string()),
                                         pattern: None,
                                     }]),
@@ -126,49 +126,6 @@ impl LanguageServer for Backend {
         }();
         if let Some(semantic_token) = semantic_tokens {
             return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
-                result_id: None,
-                data: semantic_token,
-            })));
-        }
-        Ok(None)
-    }
-
-    async fn semantic_tokens_range(
-        &self,
-        params: SemanticTokensRangeParams,
-    ) -> Result<Option<SemanticTokensRangeResult>> {
-        let uri = params.text_document.uri.to_string();
-        let semantic_tokens = || -> Option<Vec<SemanticToken>> {
-            let im_complete_tokens = self.semantic_token_map.get(&uri)?;
-            let rope = self.document_map.get(&uri)?;
-            let mut pre_line = 0;
-            let mut pre_start = 0;
-            let semantic_tokens = im_complete_tokens
-                .iter()
-                .filter_map(|token| {
-                    let line = rope.try_byte_to_line(token.start as usize).ok()? as u32;
-                    let first = rope.try_line_to_char(line as usize).ok()? as u32;
-                    let start = rope.try_byte_to_char(token.start as usize).ok()? as u32 - first;
-                    let ret = Some(SemanticToken {
-                        delta_line: line - pre_line,
-                        delta_start: if start >= pre_start {
-                            start - pre_start
-                        } else {
-                            start
-                        },
-                        length: token.length as u32,
-                        token_type: token.token_type as u32,
-                        token_modifiers_bitset: 0,
-                    });
-                    pre_line = line;
-                    pre_start = start;
-                    ret
-                })
-                .collect::<Vec<_>>();
-            Some(semantic_tokens)
-        }();
-        if let Some(semantic_token) = semantic_tokens {
-            return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
                 result_id: None,
                 data: semantic_token,
             })));
@@ -347,7 +304,7 @@ impl LanguageServer for Backend {
             let mut ret = Vec::with_capacity(completions.len());
             for (_, item) in completions {
                 match item {
-                    nrs_language_server::completion::ImCompleteCompletionItem::Variable(var) => {
+                    ImCompleteCompletionItem::Variable(var) => {
                         ret.push(CompletionItem {
                             label: var.clone(),
                             insert_text: Some(var.clone()),
@@ -356,10 +313,7 @@ impl LanguageServer for Backend {
                             ..Default::default()
                         });
                     }
-                    nrs_language_server::completion::ImCompleteCompletionItem::Function(
-                        name,
-                        args,
-                    ) => {
+                    ImCompleteCompletionItem::Function(name, args) => {
                         ret.push(CompletionItem {
                             label: name.clone(),
                             kind: Some(CompletionItemKind::FUNCTION),
@@ -379,6 +333,14 @@ impl LanguageServer for Backend {
                     }
                 }
             }
+            ret.push(CompletionItem {
+                label: "42".into(),
+                kind: Some(CompletionItemKind::CONSTANT),
+                detail: Some("The meaning of life and everything".into()),
+                insert_text: Some("TETTEN".into()),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            });
             Some(ret)
         }();
         Ok(completions.map(CompletionResponse::Array))
@@ -415,12 +377,12 @@ impl Backend {
                     k.start,
                     k.end,
                     match v {
-                        nrs_language_server::chumsky::Value::Null => "null".to_string(),
-                        nrs_language_server::chumsky::Value::Bool(_) => "bool".to_string(),
-                        nrs_language_server::chumsky::Value::Num(_) => "number".to_string(),
-                        nrs_language_server::chumsky::Value::Str(_) => "string".to_string(),
-                        nrs_language_server::chumsky::Value::List(_) => "[]".to_string(),
-                        nrs_language_server::chumsky::Value::Func(_) => v.to_string(),
+                        jsonld_language_server::chumsky::Value::Null => "null".to_string(),
+                        jsonld_language_server::chumsky::Value::Bool(_) => "bool".to_string(),
+                        jsonld_language_server::chumsky::Value::Num(_) => "number".to_string(),
+                        jsonld_language_server::chumsky::Value::Str(_) => "string".to_string(),
+                        jsonld_language_server::chumsky::Value::List(_) => "[]".to_string(),
+                        jsonld_language_server::chumsky::Value::Func(_) => v.to_string(),
                     },
                 )
             })
@@ -435,7 +397,7 @@ impl Backend {
         self.client
             .log_message(MessageType::INFO, format!("{:?}", errors))
             .await;
-        let diagnostics = errors
+        let mut diagnostics = errors
             .into_iter()
             .filter_map(|item| {
                 let (message, span) = match item.reason() {
@@ -467,23 +429,29 @@ impl Backend {
                     chumsky::error::SimpleReason::Custom(msg) => (msg.to_string(), item.span()),
                 };
 
-                let diagnostic = || -> Option<Diagnostic> {
-                    // let start_line = rope.try_char_to_line(span.start)?;
-                    // let first_char = rope.try_line_to_char(start_line)?;
-                    // let start_column = span.start - first_char;
-                    let start_position = offset_to_position(span.start, &rope)?;
-                    let end_position = offset_to_position(span.end, &rope)?;
-                    // let end_line = rope.try_char_to_line(span.end)?;
-                    // let first_char = rope.try_line_to_char(end_line)?;
-                    // let end_column = span.end - first_char;
-                    Some(Diagnostic::new_simple(
-                        Range::new(start_position, end_position),
-                        message,
-                    ))
-                }();
-                diagnostic
+                // let start_line = rope.try_char_to_line(span.start)?;
+                // let first_char = rope.try_line_to_char(start_line)?;
+                // let start_column = span.start - first_char;
+                let start_position = offset_to_position(span.start, &rope)?;
+                let end_position = offset_to_position(span.end, &rope)?;
+                // let end_line = rope.try_char_to_line(span.end)?;
+                // let first_char = rope.try_line_to_char(end_line)?;
+                // let end_column = span.end - first_char;
+                Some(Diagnostic::new_simple(
+                    Range::new(start_position, end_position),
+                    message,
+                ))
             })
             .collect::<Vec<_>>();
+
+        if let (Some(start), Some(end)) =
+            (offset_to_position(0, &rope), offset_to_position(2, &rope))
+        {
+            diagnostics.push(Diagnostic::new_simple(
+                Range::new(start, end),
+                String::from("tetten zijn leuk"),
+            ));
+        }
 
         self.client
             .publish_diagnostics(params.uri.clone(), diagnostics, Some(params.version))
@@ -492,9 +460,6 @@ impl Backend {
         if let Some(ast) = ast {
             self.ast_map.insert(params.uri.to_string(), ast);
         }
-        self.client
-            .log_message(MessageType::INFO, &format!("{:?}", semantic_tokens))
-            .await;
         self.semantic_token_map
             .insert(params.uri.to_string(), semantic_tokens);
     }

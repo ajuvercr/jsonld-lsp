@@ -70,6 +70,27 @@ https://user-images.githubusercontent.com/17974631/157367235-7091a36c-631a-4347-
 https://user-images.githubusercontent.com/17974631/157367229-99903896-5583-4f67-a6da-1ae1cf206876.mp4
 
 
+## Add to nvim
+
+```lua
+local lspconfig = require("lspconfig")
+local configs = require("lspconfig.configs")
+configs.jsonld = {
+  default_config = {
+    cmd = { 'jsonld-language-server' },
+    filetypes = { 'jsonld' },
+    root_dir = require("lspconfig.util").find_git_ancestor,
+    single_file_support = true,
+    init_options = {},
+    autostart = true,
+  },
+  autostart = true,
+}
+lspconfig.jsonld.setup {
+  on_attach = astronvim.lsp.on_attach,
+  autostart = true,
+}
+```
 
 
 

@@ -1,5 +1,5 @@
 [package]
-name = "nrs-language-server"
+name = "jsonld-language-server"
 version = "0.1.0"
 edition = "2021"
 
@@ -16,7 +16,5 @@ serde = { version = "1.0", features = ["derive"] }
 dashmap = "5.1.0"
 log = "0.4.14"
 im-rc = "15.0.0"
+json-spanned-value = { version = "0.2.2", features = ["preserve_order"] }
 
-
-[debug]
-incremental = true
