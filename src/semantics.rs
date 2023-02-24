@@ -1,6 +1,4 @@
-
 use tower_lsp::lsp_types::SemanticTokenType;
-
 
 pub const LEGEND_TYPE: &[SemanticTokenType] = &[
     SemanticTokenType::FUNCTION,

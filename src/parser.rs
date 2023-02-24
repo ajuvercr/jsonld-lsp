@@ -1,47 +1,53 @@
 use chumsky::prelude::*;
 use std::{
+    borrow::Borrow,
     collections::HashMap,
-    ops::{Deref, Range}, borrow::Borrow,
+    ops::{Deref, Range},
 };
-
 
 pub fn parse(source: &str) -> (Spanned<Json>, Vec<Error>) {
     let (json, errs) = parser().parse_recovery(source);
-    let errors = errs.into_iter().map(|e| {
-        let msg = if let chumsky::error::SimpleReason::Custom(msg) = e.reason() {
-            msg.clone()
-        } else {
-            format!(
-                "{}{}, expected {}",
-                if e.found().is_some() {
-                    "Unexpected token"
-                } else {
-                    "Unexpected end of input"
-                },
-                if let Some(label) = e.label() {
-                    format!(" while parsing {}", label)
-                } else {
-                    String::new()
-                },
-                if e.expected().len() == 0 {
-                    "something else".to_string()
-                } else {
-                    e.expected()
-                        .map(|expected| match expected {
-                            Some(expected) => format!("'{}'", expected),
-                            None => "end of input".to_string(),
-                        })
-                        .collect::<Vec<_>>()
-                        .join(" or ")
-                },
-            )
-        };
-        Error { msg, span: e.span()}
-    }).collect();
+    let errors = errs
+        .into_iter()
+        .map(|e| {
+            let msg = if let chumsky::error::SimpleReason::Custom(msg) = e.reason() {
+                msg.clone()
+            } else {
+                format!(
+                    "{}{}, expected {}",
+                    if e.found().is_some() {
+                        "Unexpected token"
+                    } else {
+                        "Unexpected end of input"
+                    },
+                    if let Some(label) = e.label() {
+                        format!(" while parsing {}", label)
+                    } else {
+                        String::new()
+                    },
+                    if e.expected().len() == 0 {
+                        "something else".to_string()
+                    } else {
+                        e.expected()
+                            .map(|expected| match expected {
+                                Some(expected) => format!("'{}'", expected),
+                                None => "end of input".to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" or ")
+                    },
+                )
+            };
+            Error {
+                msg,
+                span: e.span(),
+            }
+        })
+        .collect();
 
     (
         json.unwrap_or_else(|| Spanned(Json::Invalid, 0..source.len())),
-        errors
+        errors,
     )
 }
 
@@ -147,6 +153,59 @@ impl Json {
             _ => None,
         }
     }
+
+    pub fn iter<'a>(&'a self) -> JsonIter<'a> {
+        JsonIter { stack: vec![self] }
+    }
+}
+
+pub struct JsonIter<'a> {
+    stack: Vec<&'a Json>,
+}
+impl<'a> Iterator for JsonIter<'a> {
+    type Item = &'a Json;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(item) = self.stack.pop() {
+            match item {
+                Json::Array(s) => {
+                    self.stack.extend(s.iter().rev().map(|x| x.value()));
+                }
+                Json::Object(s) => {
+                    self.stack.extend(s.values().map(|x| x.value()));
+                }
+                _ => {}
+            };
+
+            Some(item)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse;
+
+    #[test]
+    fn test_it() {
+        let json = r#"
+{ "@context": "https://data.vlaanderen.be/doc/applicatieprofiel/sensoren-en-bemonstering/kandidaatstandaard/2022-04-28/context/ap-sensoren-en-bemonstering.jsonld", "@id": "tetten"         ,     }
+            "#;
+        let (json, _) = parse(json);
+
+        let array = json.iter().count();
+        assert_eq!(array, 1);
+
+        let json = r#"
+{ "@context": "https://data.vlaanderen.be/doc/applicatieprofiel/sensoren-en-bemonstering/kandidaatstandaard/2022-04-28/context/ap-sensoren-en-bemonstering.jsonld", "@id": "tetten"}
+            "#;
+        let (json, _) = parse(json);
+
+        let array = json.iter().count();
+        assert_eq!(array, 3);
+    }
 }
 
 // Source: https://github.com/zesterer/chumsky/blob/master/examples/json.rs
@@ -204,6 +263,7 @@ fn parser() -> impl Parser<char, Spanned<Json>, Error = Simple<char>> {
             .chain(just(',').ignore_then(value.clone()).repeated())
             .or_not()
             .flatten()
+            .padded()
             .delimited_by(just('['), just(']'))
             .map(Json::Array)
             .labelled("array");
@@ -239,6 +299,6 @@ fn parser() -> impl Parser<char, Spanned<Json>, Error = Simple<char>> {
             .padded()
             .map_with_span(spanned)
     })
-    .then_ignore(end().recover_with(skip_then_retry_until([]))).padded()
+    .then_ignore(end().recover_with(skip_then_retry_until([])))
+    .padded()
 }
-

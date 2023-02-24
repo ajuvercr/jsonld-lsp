@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
 use iref::IriBuf;
 use json_ld::syntax::context::{definition, FragmentRef, Value};
 use json_ld::{ContextLoader, ReqwestLoader};
-use jsonld_language_server::parser::{Obj, parse, Json};
+use jsonld_language_server::parser::{parse, Json};
 use jsonld_language_server::semantics::LEGEND_TYPE;
 use locspan::Location;
 use ropey::Rope;
@@ -34,7 +34,6 @@ fn get_definition_ref(
                         .to_string()
                 }
             };
-            // println!("{:?}", value.definition.metadata());
             Some(Definition {
                 key: key.as_str().to_string(),
                 value: binding,
@@ -54,9 +53,7 @@ impl ContextResolver {
         frag: FragmentRef<Location<IriBuf>, Value<Location<IriBuf>>>,
     ) -> Option<Definition> {
         match frag {
-            // FragmentRef::Context(x) => print_context_ref(&x),
             FragmentRef::DefinitionFragment(x) => get_definition_ref(&x),
-            // FragmentRef::ContextArray(_) => println!("context array"),
             _ => None,
         }
     }
@@ -106,6 +103,7 @@ struct Backend {
     client: Client,
     resolver: ContextResolver,
     contexts: DashMap<String, Context>,
+    ids: DashMap<String, HashSet<String>>,
 }
 
 #[tower_lsp::async_trait]
@@ -119,7 +117,7 @@ impl LanguageServer for Backend {
                 )),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
-                    trigger_characters: Some(vec![".".to_string()]),
+                    trigger_characters: Some(vec!["@".to_string()]),
                     work_done_progress_options: Default::default(),
                     all_commit_characters: None,
                 }),
@@ -127,7 +125,6 @@ impl LanguageServer for Backend {
                     commands: vec!["dummy.do_something".to_string()],
                     work_done_progress_options: Default::default(),
                 }),
-
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                         supported: Some(true),
@@ -168,6 +165,7 @@ impl LanguageServer for Backend {
             },
         })
     }
+
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
@@ -227,10 +225,15 @@ impl LanguageServer for Backend {
         .await;
     }
 
-    async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let ev: Vec<_> = params.content_changes.iter().map(|x| x.text.len()).collect();
+        self.client
+            .log_message(MessageType::INFO, format!("did change! {:?}", ev))
+            .await;
+
         self.on_change(TextDocumentItem {
             uri: params.text_document.uri,
-            text: std::mem::take(&mut params.content_changes[0].text),
+            text: params.content_changes[0].text.clone(),
             version: params.text_document.version,
         })
         .await;
@@ -249,47 +252,65 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let ctx = params
+            .context
+            .as_ref()
+            .and_then(|x| x.trigger_character.clone());
+
         let uri = params.text_document_position.text_document.uri;
 
-        self.client
-            .log_message(
-                MessageType::INFO,
-                format!(
-                    "Found context {} ({})",
-                    self.contexts.get(uri.as_str()).is_some(),
-                    uri.as_str()
-                ),
-            )
-            .await;
-
-        let completions = (|| {
-            let ctx = self.contexts.get(uri.as_str())?;
-
-            let completions: Vec<_> = ctx
-                .definitions
-                .values()
-                .map(|v| CompletionItem {
-                    label: v.key.to_string(),
-                    kind: Some(CompletionItemKind::PROPERTY),
-                    detail: Some(format!("{} -> {}", v.key, v.value)),
-                    insert_text: Some(v.key.to_string()),
-                    ..Default::default()
+        let mut completions = if let (Some("@"), Some(ids)) =
+            (ctx.as_ref().map(|x| x.as_str()), self.ids.get(uri.as_str()))
+        {
+            let end = params.text_document_position.position;
+            let start = Position::new(end.line, end.character - 1);
+            let range = Range::new(start, end);
+            let out: Vec<_> = ids
+                .iter()
+                .map(|s| {
+                    let w = format!("@{}", s);
+                    CompletionItem {
+                        label: s.clone(),
+                        kind: Some(CompletionItemKind::VARIABLE),
+                        sort_text: Some(w.clone()),
+                        filter_text: Some(w.clone()),
+                        detail: Some(format!("@{}", s)),
+                        // insert_text: Some(format!("{{\"@id\": \"{}\"}}", s)),
+                        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                            range,
+                            new_text: format!("{{\"@id\": \"{}\"}}", s),
+                        })),
+                        ..Default::default()
+                    }
                 })
                 .collect();
-            Some(completions)
-        })();
+            let filters: Vec<_> = out.iter().flat_map(|x| &x.filter_text).collect();
+            // self.client
+            //     .log_message(MessageType::INFO, format!("filter {:?}", filters))
+            //     .await;
+            self.client
+                .show_message(
+                    MessageType::INFO,
+                    format!("filter {:?} ids {:?}", filters, ids),
+                )
+                .await;
+            out
+        } else {
+            Vec::new()
+        };
 
-        self.client
-            .log_message(
-                MessageType::INFO,
-                format!(
-                    "Found {} completions",
-                    completions.as_ref().map(|x| x.len()).unwrap_or(0)
-                ),
-            )
-            .await;
+        if let Some(ctx) = self.contexts.get(uri.as_str()) {
+            let extra = ctx.definitions.values().map(|v| CompletionItem {
+                label: v.key.to_string(),
+                kind: Some(CompletionItemKind::PROPERTY),
+                detail: Some(format!("```{} -> {}```", v.key, v.value)),
+                insert_text: Some(v.key.to_string()),
+                ..Default::default()
+            });
+            completions.extend(extra);
+        }
 
-        Ok(completions.map(CompletionResponse::Array))
+        Ok(Some(CompletionResponse::Array(completions)))
     }
 }
 
@@ -313,10 +334,7 @@ impl Backend {
 
         if let Some(arr) = context.as_arr() {
             let mut base: Option<Context> = None;
-            for sol in arr
-                .iter()
-                .filter_map(|x| x.as_str())
-            {
+            for sol in arr.iter().filter_map(|x| x.as_str()) {
                 if let Some(con) = self.resolver.resolve(sol).await {
                     if let Some(x) = base.as_mut() {
                         x.merge(con.value());
@@ -330,86 +348,66 @@ impl Backend {
         None
     }
 
+    fn find_ids(&self, obj: &Json) -> HashSet<String> {
+        obj.iter()
+            .take(1000)
+            .filter_map(Json::as_obj)
+            .filter_map(|x| x.get("@id"))
+            .map(|x| x.value())
+            .filter_map(Json::as_str)
+            .map(String::from)
+            .collect()
+    }
+
     async fn on_change(&self, params: TextDocumentItem) -> Option<()> {
+        self.client
+            .log_message(MessageType::INFO, "Start on_change")
+            .await;
+
         let (json, errors) = parse(&params.text);
 
         if let Some(ctx) = self.find_ctx(&json).await {
-            self.client
-                .log_message(
-                    MessageType::INFO,
-                    format!(
-                        "Succesfully found jsonld context ({})",
-                        params.uri.to_string()
-                    ),
-                )
-                .await;
             self.contexts.insert(params.uri.to_string(), ctx);
+            self.client
+                .log_message(MessageType::INFO, "Found jsonld context")
+                .await;
         }
 
-        self.client
-            .log_message(MessageType::INFO, "Succesfully parsed jsonld")
-            .await;
-        // Try to get the context from the file
-        //
-        // let mut diagnostics = errors
-        //     .into_iter()
-        //     .filter_map(|item| {
-        //         let (message, span) = match item.reason() {
-        //             chumsky::error::SimpleReason::Unclosed { span, delimiter } => {
-        //                 (format!("Unclosed delimiter {}", delimiter), span.clone())
-        //             }
-        //             chumsky::error::SimpleReason::Unexpected => (
-        //                 format!(
-        //                     "{}, expected {}",
-        //                     if item.found().is_some() {
-        //                         "Unexpected token in input"
-        //                     } else {
-        //                         "Unexpected end of input"
-        //                     },
-        //                     if item.expected().len() == 0 {
-        //                         "something else".to_string()
-        //                     } else {
-        //                         item.expected()
-        //                             .map(|expected| match expected {
-        //                                 Some(expected) => expected.to_string(),
-        //                                 None => "end of input".to_string(),
-        //                             })
-        //                             .collect::<Vec<_>>()
-        //                             .join(", ")
-        //                     }
-        //                 ),
-        //                 item.span(),
-        //             ),
-        //             chumsky::error::SimpleReason::Custom(msg) => (msg.to_string(), item.span()),
-        //         };
-        //
-        //         // let start_line = rope.try_char_to_line(span.start)?;
-        //         // let first_char = rope.try_line_to_char(start_line)?;
-        //         // let start_column = span.start - first_char;
-        //         let start_position = offset_to_position(span.start, &rope)?;
-        //         let end_position = offset_to_position(span.end, &rope)?;
-        //         // let end_line = rope.try_char_to_line(span.end)?;
-        //         // let first_char = rope.try_line_to_char(end_line)?;
-        //         // let end_column = span.end - first_char;
-        //         Some(Diagnostic::new_simple(
-        //             Range::new(start_position, end_position),
-        //             message,
-        //         ))
-        //     })
-        //     .collect::<Vec<_>>();
-        //
-        // if let (Some(start), Some(end)) =
-        //     (offset_to_position(0, &rope), offset_to_position(2, &rope))
-        // {
-        //     diagnostics.push(Diagnostic::new_simple(
-        //         Range::new(start, end),
-        //         String::from("tetten zijn leuk"),
-        //     ));
-        // }
+        let uri_str = params.uri.as_str();
+        if !self.ids.contains_key(uri_str) {
+            self.ids.insert(uri_str.to_string(), HashSet::default());
+        }
 
-        // self.client
-        //     .publish_diagnostics(params.uri.clone(), diagnostics, Some(params.version))
-        //     .await;
+        let ids = self.find_ids(&json);
+
+        if !errors.is_empty() {
+            if let Some(mut p) = self.ids.get_mut(uri_str) {
+                p.value_mut().extend(ids);
+            }
+        } else {
+          self.ids.insert(params.uri.to_string(), ids);
+        }
+
+        let rope = Rope::from_str(&params.text);
+        let diagnostics = errors
+            .into_iter()
+            .filter_map(|item| {
+                let (span, message) = (item.span, item.msg);
+                let start_position = offset_to_position(span.start, &rope)?;
+                let end_position = offset_to_position(span.end, &rope)?;
+                Some(Diagnostic::new_simple(
+                    Range::new(start_position, end_position),
+                    message,
+                ))
+            })
+            .collect::<Vec<_>>();
+
+        self.client
+            .publish_diagnostics(params.uri.clone(), diagnostics, Some(params.version))
+            .await;
+        self.client
+            .log_message(MessageType::INFO, "finished on_change")
+            .await;
         Some(())
     }
 }
@@ -425,6 +423,7 @@ async fn main() {
         client,
         contexts: DashMap::new(),
         resolver: ContextResolver::new(),
+        ids: DashMap::new(),
     })
     .finish();
     Server::new(stdin, stdout, socket).serve(service).await;

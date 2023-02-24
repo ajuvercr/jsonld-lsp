@@ -1,9 +1,6 @@
-use std::{
-    env, fs,
-};
+use std::{env, fs};
 
 use jsonld_language_server::parser::parse;
-
 
 fn main() {
     let src = fs::read_to_string(env::args().nth(1).expect("Expected file argument"))
