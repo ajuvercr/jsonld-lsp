@@ -1,9 +1,7 @@
 use chumsky::prelude::*;
-use std::{
-    borrow::Borrow,
-    collections::HashMap,
-    ops::{Deref, Range},
-};
+use std::ops::Range;
+
+use crate::model::{spanned, Json, Obj, Spanned};
 
 pub fn parse(source: &str) -> (Spanned<Json>, Vec<Error>) {
     let (json, errs) = parser().parse_recovery(source);
@@ -55,133 +53,6 @@ pub fn parse(source: &str) -> (Spanned<Json>, Vec<Error>) {
 pub struct Error {
     pub msg: String,
     pub span: Range<usize>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Spanned<T>(T, Range<usize>);
-impl<T: PartialEq> PartialEq for Spanned<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq(&other.0)
-    }
-}
-impl<T: std::hash::Hash> std::hash::Hash for Spanned<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.hash(state)
-    }
-}
-impl<T: PartialEq> Eq for Spanned<T> {}
-
-fn spanned<T>(t: T, span: Range<usize>) -> Spanned<T> {
-    Spanned(t, span)
-}
-
-impl Borrow<str> for Spanned<String> {
-    #[inline]
-    fn borrow(&self) -> &str {
-        &self[..]
-    }
-}
-
-impl<T> Deref for Spanned<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<T> Spanned<T> {
-    pub fn into_value(self) -> T {
-        self.0
-    }
-    pub fn into_span(self) -> Range<usize> {
-        self.1
-    }
-    pub fn value(&self) -> &T {
-        &self.0
-    }
-    pub fn span(&self) -> &Range<usize> {
-        &self.1
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum Json {
-    Invalid,
-    Null,
-    Bool(bool),
-    Str(String),
-    Num(f64),
-    Array(Vec<Spanned<Json>>),
-    Object(Obj),
-}
-pub type Obj = HashMap<Spanned<String>, Spanned<Json>>;
-
-#[allow(unused)]
-impl Json {
-    pub fn as_bool(&self) -> Option<bool> {
-        match self {
-            Json::Bool(x) => Some(*x),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> Option<&str> {
-        match self {
-            Json::Str(x) => Some(x),
-            _ => None,
-        }
-    }
-
-    pub fn as_num(&self) -> Option<f64> {
-        match self {
-            Json::Num(x) => Some(*x),
-            _ => None,
-        }
-    }
-
-    pub fn as_arr(&self) -> Option<&[Spanned<Json>]> {
-        match self {
-            Json::Array(x) => Some(x),
-            _ => None,
-        }
-    }
-
-    pub fn as_obj(&self) -> Option<&Obj> {
-        match self {
-            Json::Object(x) => Some(x),
-            _ => None,
-        }
-    }
-
-    pub fn iter<'a>(&'a self) -> JsonIter<'a> {
-        JsonIter { stack: vec![self] }
-    }
-}
-
-pub struct JsonIter<'a> {
-    stack: Vec<&'a Json>,
-}
-impl<'a> Iterator for JsonIter<'a> {
-    type Item = &'a Json;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(item) = self.stack.pop() {
-            match item {
-                Json::Array(s) => {
-                    self.stack.extend(s.iter().rev().map(|x| x.value()));
-                }
-                Json::Object(s) => {
-                    self.stack.extend(s.values().map(|x| x.value()));
-                }
-                _ => {}
-            };
-
-            Some(item)
-        } else {
-            None
-        }
-    }
 }
 
 #[cfg(test)]
@@ -272,7 +143,9 @@ fn parser() -> impl Parser<char, Spanned<Json>, Error = Simple<char>> {
             .clone()
             .map_with_span(spanned)
             .then_ignore(just(':').padded())
-            .then(value);
+            .then(value)
+            .map_with_span(spanned);
+
         let object = member
             .clone()
             .chain(just(',').padded().ignore_then(member).repeated())
@@ -280,8 +153,8 @@ fn parser() -> impl Parser<char, Spanned<Json>, Error = Simple<char>> {
             .flatten()
             .padded()
             .delimited_by(just('{'), just('}'))
-            .collect::<HashMap<Spanned<String>, Spanned<Json>>>()
-            .map(Json::Object)
+            .collect::<Vec<_>>()
+            .map(|arr| Json::Object(Obj(arr)))
             .labelled("object");
 
         just("null")

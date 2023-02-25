@@ -5,11 +5,12 @@ use dashmap::DashMap;
 use iref::IriBuf;
 use json_ld::syntax::context::{definition, FragmentRef, Value};
 use json_ld::{ContextLoader, ReqwestLoader};
-use jsonld_language_server::parser::{parse, Json};
+use jsonld_language_server::model::{Json, JsonRef, Spanned};
+use jsonld_language_server::parser::parse;
 use jsonld_language_server::semantics::LEGEND_TYPE;
 use locspan::Location;
 use ropey::Rope;
-use tower_lsp::jsonrpc::Result;
+use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
@@ -58,7 +59,7 @@ impl ContextResolver {
         }
     }
 
-    pub async fn resolve<'a>(&'a self, uri: &str) -> Option<Ref<String, Context>> {
+    pub async fn resolve<'a>(&'a self, uri: &str) -> Option<Ref<'a, String, Context>> {
         if let Some(x) = self.cache.get(uri) {
             return Some(x);
         }
@@ -104,6 +105,7 @@ struct Backend {
     resolver: ContextResolver,
     contexts: DashMap<String, Context>,
     ids: DashMap<String, HashSet<String>>,
+    document: DashMap<String, (Spanned<Json>, Rope)>,
 }
 
 #[tower_lsp::async_trait]
@@ -166,12 +168,41 @@ impl LanguageServer for Backend {
         })
     }
 
-     async fn rename(
-         &self,
-        params: RenameParams
-    ) -> Result<Option<WorkspaceEdit>> {
-         Ok(None)
-     }
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let loc = params.text_document_position.position;
+
+        if let Some(x) = self
+            .document
+            .get(params.text_document_position.text_document.uri.as_str())
+        {
+            let (json, rope) = (&x.0, &x.1);
+
+            let pos =
+                position_to_offset(loc, &rope).ok_or(Error::new(ErrorCode::InvalidRequest))?;
+
+            let matched: Vec<_> = json.iter().collect();
+            if let Some(item) = json
+                .iter()
+                .filter(|x| x.span().contains(&pos))
+                .min_by_key(|x| x.span().len())
+            {
+                self.client
+                    .show_message(
+                        MessageType::INFO,
+                        format!(
+                            "Found (pos {} items {}) {:?} {:?}",
+                            pos,
+                            matched.len(),
+                            item.span(),
+                            item.value()
+                        ),
+                    )
+                    .await;
+            }
+        }
+
+        Ok(None)
+    }
 
     async fn semantic_tokens_full(
         &self,
@@ -233,7 +264,11 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let ev: Vec<_> = params.content_changes.iter().map(|x| x.text.len()).collect();
+        let ev: Vec<_> = params
+            .content_changes
+            .iter()
+            .map(|x| x.text.len())
+            .collect();
         self.client
             .log_message(MessageType::INFO, format!("did change! {:?}", ev))
             .await;
@@ -355,13 +390,13 @@ impl Backend {
         None
     }
 
-    fn find_ids(&self, obj: &Json) -> HashSet<String> {
+    fn find_ids(&self, obj: &Spanned<Json>) -> HashSet<String> {
         obj.iter()
-            .take(1000)
-            .filter_map(Json::as_obj)
+            .map(|x| *x.value())
+            .filter_map(JsonRef::as_obj)
             .filter_map(|x| x.get("@id"))
-            .map(|x| x.value())
-            .filter_map(Json::as_str)
+            .map(|x| x.as_ref())
+            .filter_map(JsonRef::as_str)
             .map(String::from)
             .collect()
     }
@@ -392,7 +427,7 @@ impl Backend {
                 p.value_mut().extend(ids);
             }
         } else {
-          self.ids.insert(params.uri.to_string(), ids);
+            self.ids.insert(params.uri.to_string(), ids);
         }
 
         let rope = Rope::from_str(&params.text);
@@ -409,6 +444,7 @@ impl Backend {
             })
             .collect::<Vec<_>>();
 
+        self.document.insert(uri_str.to_string(), (json, rope));
         self.client
             .publish_diagnostics(params.uri.clone(), diagnostics, Some(params.version))
             .await;
@@ -418,7 +454,6 @@ impl Backend {
         Some(())
     }
 }
-
 #[tokio::main]
 async fn main() {
     env_logger::init();
@@ -431,6 +466,7 @@ async fn main() {
         contexts: DashMap::new(),
         resolver: ContextResolver::new(),
         ids: DashMap::new(),
+        document: DashMap::new(),
     })
     .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
@@ -441,4 +477,14 @@ fn offset_to_position(offset: usize, rope: &Rope) -> Option<Position> {
     let first_char = rope.try_line_to_char(line).ok()?;
     let column = offset - first_char;
     Some(Position::new(line as u32, column as u32))
+}
+fn position_to_offset(position: Position, rope: &Rope) -> Option<usize> {
+    let line_offset = rope.try_line_to_char(position.line as usize).ok()?;
+    let line_length = rope.line(position.line as usize).len_chars();
+
+    if line_offset < position.character as usize {
+        Some(line_offset + position.character as usize)
+    } else {
+        None
+    }
 }
