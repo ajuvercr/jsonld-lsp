@@ -230,37 +230,8 @@ impl<'a> Iterator for ParentIter<'a> {
     }
 }
 
-#[derive(Clone, Debug, Copy)]
-pub enum JsonRef<'a> {
-    Invalid,
-    Null,
-    KV(&'a ObjMember),
-    Bool(bool),
-    Str(&'a String),
-    Num(f64),
-    Array(&'a [Spanned<Json>]),
-    Object(ObjRef<'a>),
-}
-
-impl<'a> From<&'a Json> for JsonRef<'a> {
-    fn from(x: &'a Json) -> Self {
-        match x {
-            Json::Invalid => Self::Invalid,
-            Json::Null => Self::Null,
-            Json::Bool(x) => Self::Bool(*x),
-            Json::Str(y) => Self::Str(&y),
-            Json::Num(x) => Self::Num(*x),
-            Json::Array(x) => Self::Array(&x),
-            Json::Object(x) => Self::Object(ObjRef(&x)),
-        }
-    }
-}
-
 #[allow(unused)]
 impl Json {
-    pub fn as_ref<'a>(&'a self) -> JsonRef<'a> {
-        self.into()
-    }
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             Json::Bool(x) => Some(*x),
@@ -331,88 +302,6 @@ impl JsonToken {
         match self {
             JsonToken::KV(x, y) => Some((&x, *y)),
             _ => None,
-        }
-    }
-}
-
-#[allow(unused)]
-impl<'a> JsonRef<'a> {
-    pub fn as_bool(self) -> Option<bool> {
-        match self {
-            JsonRef::Bool(x) => Some(x),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(self) -> Option<&'a str> {
-        match self {
-            JsonRef::Str(x) => Some(x),
-            _ => None,
-        }
-    }
-
-    pub fn as_num(self) -> Option<f64> {
-        match self {
-            JsonRef::Num(x) => Some(x),
-            _ => None,
-        }
-    }
-
-    pub fn as_arr(self) -> Option<&'a [Spanned<Json>]> {
-        match self {
-            JsonRef::Array(x) => Some(x),
-            _ => None,
-        }
-    }
-
-    pub fn as_obj(self) -> Option<ObjRef<'a>> {
-        match self {
-            JsonRef::Object(x) => Some(x),
-            _ => None,
-        }
-    }
-}
-
-impl Spanned<Json> {
-    pub fn iter<'a>(&'a self) -> JsonIter<'a> {
-        JsonIter {
-            stack: vec![self.map_ref(|x| JsonRef::from(x))],
-        }
-    }
-}
-
-pub struct JsonIter<'a> {
-    stack: Vec<Spanned<JsonRef<'a>>>,
-}
-
-impl<'a> Iterator for JsonIter<'a>
-where
-    Self: 'a,
-{
-    type Item = Spanned<JsonRef<'a>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(item) = self.stack.pop() {
-            match item.0 {
-                JsonRef::Array(s) => {
-                    self.stack
-                        .extend(s.iter().rev().map(|x| x.map_ref(Json::as_ref)));
-                }
-                JsonRef::Object(ObjRef(s)) => {
-                    self.stack
-                        .extend(s.into_iter().map(|y| y.map_ref(|x| JsonRef::KV(x))));
-                }
-                JsonRef::KV(mem) => {
-                    let (k, v) = (&mem.0, &mem.1);
-                    self.stack.push(k.map_ref(|x| JsonRef::Str(x)));
-                    self.stack.push(v.map_ref(Json::as_ref));
-                }
-                _ => {}
-            };
-
-            Some(item)
-        } else {
-            None
         }
     }
 }
