@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use iref::IriBuf;
 use json_ld::syntax::context::{definition, FragmentRef, Value};
 use json_ld::{ContextLoader, ReqwestLoader};
-use jsonld_language_server::model::{Json, JsonRef, Spanned};
+use jsonld_language_server::model::ParentingSystem;
 use jsonld_language_server::parser::parse;
 use jsonld_language_server::semantics::LEGEND_TYPE;
 use locspan::Location;
@@ -105,7 +105,7 @@ struct Backend {
     resolver: ContextResolver,
     contexts: DashMap<String, Context>,
     ids: DashMap<String, HashSet<String>>,
-    document: DashMap<String, (Spanned<Json>, Rope)>,
+    document: DashMap<String, (ParentingSystem, Rope)>,
 }
 
 #[tower_lsp::async_trait]
@@ -169,33 +169,60 @@ impl LanguageServer for Backend {
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
-        let loc = params.text_document_position.position;
+        let new_id = params.new_name;
 
-        if let Some(x) = self
-            .document
-            .get(params.text_document_position.text_document.uri.as_str())
-        {
-            let (json, rope) = (&x.0, &x.1);
+        let loc = params.text_document_position.position;
+        let uri = params.text_document_position.text_document.uri;
+
+        if let Some(x) = self.document.get(uri.as_str()) {
+            let (parents, rope) = (&x.0, &x.1);
 
             let pos =
                 position_to_offset(loc, &rope).ok_or(Error::new(ErrorCode::InvalidRequest))?;
 
-            let matched: Vec<_> = json.iter().collect();
-            if let Some(item) = json
+            if let Some((idx, item)) = parents // find me the most matching token
                 .iter()
-                .filter(|x| x.span().contains(&pos))
-                .min_by_key(|x| x.span().len())
+                .filter(|(_, x)| x.span().contains(&pos))
+                .min_by_key(|(_, x)| x.span().len())
             {
+                // is it's parent a key value? and am I a string?
+                if let (Some(kv), Some(old_id)) = (
+                    parents.parent(idx).and_then(|(_i, x)| x.as_kv()),
+                    item.as_str(),
+                ) {
+                    // Check if we can actually rename this, qq
+                    if kv.0.as_str() == "@id" {
+                        let changes: Vec<_> = parents
+                            .iter()
+                            .map(|(_, x)| x) // I only care about values
+                            .filter_map(|x| x.as_kv()) // give me key value pairs
+                            .filter(|x| x.0.as_str() == "@id") // that are @id as key
+                            .map(|x| &parents[x.1]) // now give me the value
+                            .filter_map(|x| x.map_ref(|x| x.as_str()).transpose()) // that is a string
+                            .filter(|x| x.value() == &old_id) // and matches the old value
+                            // This should change to the new value
+                            // (take care of quotes)
+                            .filter_map(|x| {
+                                offsets_to_range(x.span().start + 1, x.span().end - 1, rope)
+                            })
+                            .map(|x| TextEdit::new(x, new_id.clone()))
+                            .collect();
+
+                        let mut map = HashMap::new();
+                        map.insert(uri, changes);
+
+                        return Ok(Some(WorkspaceEdit {
+                            changes: Some(map),
+                            document_changes: None,
+                            change_annotations: None,
+                        }));
+                    }
+                }
+
                 self.client
                     .show_message(
                         MessageType::INFO,
-                        format!(
-                            "Found (pos {} items {}) {:?} {:?}",
-                            pos,
-                            matched.len(),
-                            item.span(),
-                            item.value()
-                        ),
+                        format!("Found (pos {} ) {:?}", pos, item),
                     )
                     .await;
             }
@@ -326,10 +353,8 @@ impl LanguageServer for Backend {
                     }
                 })
                 .collect();
+
             let filters: Vec<_> = out.iter().flat_map(|x| &x.filter_text).collect();
-            // self.client
-            //     .log_message(MessageType::INFO, format!("filter {:?}", filters))
-            //     .await;
             self.client
                 .show_message(
                     MessageType::INFO,
@@ -363,9 +388,14 @@ struct TextDocumentItem {
 }
 
 impl Backend {
-    async fn find_ctx(&self, obj: &Json) -> Option<Context> {
-        let obj = obj.as_obj()?;
-        let context = obj.get("@context")?;
+    async fn find_ctx(&self, obj: &ParentingSystem) -> Option<Context> {
+        let context_kv = obj
+            .iter()
+            .map(|(_, x)| x)
+            .filter_map(|x| x.as_kv())
+            .find(|x| x.0.as_str() == "@context")?;
+
+        let context = &obj[context_kv.1];
 
         if let Some(x) = context.as_str() {
             self.client
@@ -376,7 +406,7 @@ impl Backend {
 
         if let Some(arr) = context.as_arr() {
             let mut base: Option<Context> = None;
-            for sol in arr.iter().filter_map(|x| x.as_str()) {
+            for sol in arr.iter().map(|i| &obj[*i]).filter_map(|x| x.as_str()) {
                 if let Some(con) = self.resolver.resolve(sol).await {
                     if let Some(x) = base.as_mut() {
                         x.merge(con.value());
@@ -390,13 +420,13 @@ impl Backend {
         None
     }
 
-    fn find_ids(&self, obj: &Spanned<Json>) -> HashSet<String> {
+    fn find_ids(&self, obj: &ParentingSystem) -> HashSet<String> {
         obj.iter()
-            .map(|x| *x.value())
-            .filter_map(JsonRef::as_obj)
-            .filter_map(|x| x.get("@id"))
-            .map(|x| x.as_ref())
-            .filter_map(JsonRef::as_str)
+            .map(|(_, x)| x)
+            .filter_map(|x| x.as_kv())
+            .filter(|x| x.0.as_str() == "@id")
+            .map(|x| &obj[x.1])
+            .filter_map(|x| x.as_str())
             .map(String::from)
             .collect()
     }
@@ -407,8 +437,9 @@ impl Backend {
             .await;
 
         let (json, errors) = parse(&params.text);
+        let parenting = ParentingSystem::from_json(json);
 
-        if let Some(ctx) = self.find_ctx(&json).await {
+        if let Some(ctx) = self.find_ctx(&parenting).await {
             self.contexts.insert(params.uri.to_string(), ctx);
             self.client
                 .log_message(MessageType::INFO, "Found jsonld context")
@@ -420,7 +451,7 @@ impl Backend {
             self.ids.insert(uri_str.to_string(), HashSet::default());
         }
 
-        let ids = self.find_ids(&json);
+        let ids = self.find_ids(&parenting);
 
         if !errors.is_empty() {
             if let Some(mut p) = self.ids.get_mut(uri_str) {
@@ -444,7 +475,7 @@ impl Backend {
             })
             .collect::<Vec<_>>();
 
-        self.document.insert(uri_str.to_string(), (json, rope));
+        self.document.insert(uri_str.to_string(), (parenting, rope));
         self.client
             .publish_diagnostics(params.uri.clone(), diagnostics, Some(params.version))
             .await;
@@ -482,9 +513,14 @@ fn position_to_offset(position: Position, rope: &Rope) -> Option<usize> {
     let line_offset = rope.try_line_to_char(position.line as usize).ok()?;
     let line_length = rope.line(position.line as usize).len_chars();
 
-    if line_offset < position.character as usize {
+    if (position.character as usize) < line_length {
         Some(line_offset + position.character as usize)
     } else {
         None
     }
+}
+fn offsets_to_range(start: usize, end: usize, rope: &Rope) -> Option<Range> {
+    let start = offset_to_position(start, rope)?;
+    let end = offset_to_position(end, rope)?;
+    Some(Range { start, end })
 }
