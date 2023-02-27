@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use iref::IriBuf;
 use json_ld::syntax::context::{definition, FragmentRef, Value};
 use json_ld::{ContextLoader, ReqwestLoader};
-use jsonld_language_server::model::{ParentingSystem, JsonToken};
+use jsonld_language_server::model::{JsonToken, ParentingSystem};
 use jsonld_language_server::parser::parse;
 use jsonld_language_server::semantics::LEGEND_TYPE;
 use locspan::Location;
@@ -162,13 +162,19 @@ impl LanguageServer for Backend {
                 // definition: Some(GotoCapability::default()),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
-                rename_provider: Some(OneOf::Right(RenameOptions { prepare_provider: Some(true), work_done_progress_options: Default::default() })),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: Default::default(),
+                })),
                 ..ServerCapabilities::default()
             },
         })
     }
 
-    async fn prepare_rename(&self, params: TextDocumentPositionParams) -> Result<Option<PrepareRenameResponse>> {
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
         let loc = params.position;
         let uri = params.text_document.uri;
         if let Some(x) = self.document.get(uri.as_str()) {
@@ -187,9 +193,12 @@ impl LanguageServer for Backend {
                 };
                 let span = item.span();
                 if let Some(range) = offsets_to_range(span.start + 1, span.end - 1, &rope) {
-                    return Ok(Some(PrepareRenameResponse::RangeWithPlaceholder{ range, placeholder: String::from(st)})) ;
+                    return Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
+                        range,
+                        placeholder: String::from(st),
+                    }));
                 }
-            } 
+            }
         }
         Ok(None)
     }

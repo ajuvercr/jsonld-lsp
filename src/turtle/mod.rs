@@ -18,12 +18,21 @@ impl Display for Literal {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NamedNode(pub String);
+pub enum NamedNode {
+    Full(String),
+    Prefixed { prefix: String, value: String },
+    A,
+}
 impl Display for NamedNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<{}>", self.0)
+        match self {
+            NamedNode::Full(x) => write!(f, "<{}>", x),
+            NamedNode::Prefixed { prefix, value } => write!(f, "{}:{}", prefix, value),
+            NamedNode::A => write!(f, "a"),
+        }
     }
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlankNode(pub String);
 impl Display for BlankNode {
@@ -101,6 +110,7 @@ pub enum O {
     Term(Spanned<Term>),
     Object(Vec<Spanned<PO>>),
 }
+
 impl O {
     pub fn is_term(&self) -> bool {
         match self {
@@ -115,7 +125,6 @@ impl O {
             O::Object(_) => true,
         }
     }
-
 }
 impl Display for O {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -125,12 +134,61 @@ impl Display for O {
                 write!(f, "[ {}", o[0].value())?;
 
                 for p in &o[1..] {
-                  write!(f, "; {}", p.value())?;
+                    write!(f, "; {}", p.value())?;
                 }
 
                 write!(f, " ]")
-            },
+            }
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Base(pub Spanned<NamedNode>);
+impl Display for Base {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@base {} .", self.0.value())
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Prefix {
+    pub prefix: Spanned<String>,
+    pub value: Spanned<NamedNode>,
+}
+impl Display for Prefix {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "@prefix {}: {} .",
+            self.prefix.value(),
+            self.value.value()
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Turtle {
+    base: Option<Spanned<Base>>,
+    prefixes: Vec<Spanned<Prefix>>,
+    triples: Vec<Spanned<Triple>>,
+}
+impl Display for Turtle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(b) = &self.base {
+            writeln!(f, "{}", b.value())?;
+        }
+
+        self.prefixes
+            .iter()
+            .map(|x| x.value())
+            .try_for_each(|x| writeln!(f, "{}", x))?;
+
+        self.triples
+            .iter()
+            .map(|x| x.value())
+            .try_for_each(|x| writeln!(f, "{}", x))?;
+
+        Ok(())
     }
 }
 

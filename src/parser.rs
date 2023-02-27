@@ -57,6 +57,8 @@ pub struct Error {
 
 #[cfg(test)]
 mod tests {
+    use crate::model::ParentingSystem;
+
     use super::parse;
 
     #[test]
@@ -65,6 +67,7 @@ mod tests {
 { "@context": "https://data.vlaanderen.be/doc/applicatieprofiel/sensoren-en-bemonstering/kandidaatstandaard/2022-04-28/context/ap-sensoren-en-bemonstering.jsonld", "@id": "tetten"         ,     }
             "#;
         let (json, _) = parse(json);
+        let json = ParentingSystem::from_json(json);
 
         let array = json.iter().count();
         assert_eq!(array, 1);
@@ -73,9 +76,10 @@ mod tests {
 { "@context": "https://data.vlaanderen.be/doc/applicatieprofiel/sensoren-en-bemonstering/kandidaatstandaard/2022-04-28/context/ap-sensoren-en-bemonstering.jsonld", "@id": "tetten"}
             "#;
         let (json, _) = parse(json);
+        let json = ParentingSystem::from_json(json);
 
         let array = json.iter().count();
-        assert_eq!(array, 3);
+        assert_eq!(array, 5);
     }
 }
 

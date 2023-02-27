@@ -2,7 +2,7 @@ use chumsky::{prelude::*, text::Character};
 
 use crate::model::spanned;
 
-use super::{BlankNode, Literal, NamedNode, Subject, Term, Triple, O, PO};
+use super::{Base, BlankNode, Literal, NamedNode, Prefix, Subject, Term, Triple, Turtle, O, PO};
 
 fn escape() -> impl Parser<char, char, Error = Simple<char>> {
     just('\\').ignore_then(
@@ -32,7 +32,9 @@ fn escape() -> impl Parser<char, char, Error = Simple<char>> {
 }
 
 fn parse_namednode() -> impl Parser<char, NamedNode, Error = Simple<char>> {
-    just('<')
+    let a = just('a').map(|_| NamedNode::A);
+
+    let full = just('<')
         .ignore_then(
             filter(|c| *c != '>' && *c != '\\' && !(*c as char).is_whitespace())
                 .or(escape())
@@ -40,8 +42,26 @@ fn parse_namednode() -> impl Parser<char, NamedNode, Error = Simple<char>> {
         )
         .then_ignore(just('>'))
         .collect::<String>()
-        .map(|x| NamedNode(x))
-        .labelled("NamedNode")
+        .map(|x| NamedNode::Full(x))
+        .labelled("NamedNode full");
+
+    let simple_string = || {
+        filter(|c| !(*c as char).is_whitespace() && *c != ':' && *c != '\\')
+            .or(escape())
+            .repeated()
+            .collect::<String>()
+    };
+
+    let prefixed = simple_string()
+        .then_ignore(just(':'))
+        .then(simple_string())
+        .padded()
+        .map(|(p, n)| NamedNode::Prefixed {
+            prefix: p,
+            value: n,
+        });
+
+    a.or(full).or(prefixed)
 }
 
 fn parse_literal() -> impl Parser<char, Literal, Error = Simple<char>> {
@@ -94,10 +114,7 @@ fn parse_predicate_object() -> impl Parser<char, PO, Error = Simple<char>> {
             .map_with_span(spanned)
             .padded()
             .then(po.chain(just(',').ignore_then(po2).repeated()))
-            .map(|(predicate, object)| PO {
-                predicate,
-                object,
-            })
+            .map(|(predicate, object)| PO { predicate, object })
     })
 }
 
@@ -109,8 +126,10 @@ fn parse_object(
     parse_term()
         .map_with_span(spanned)
         .map(|x| O::Term(x))
-        .or(ppo.chain(just(';').ignore_then(ppo2).repeated())
-            .delimited_by(just('['), just(']')).padded()
+        .or(ppo
+            .chain(just(';').ignore_then(ppo2).repeated())
+            .delimited_by(just('['), just(']'))
+            .padded()
             .map(|x| O::Object(x)))
 }
 
@@ -125,22 +144,61 @@ pub fn parse_triple() -> impl Parser<char, Triple, Error = Simple<char>> {
 
     subject
         .padded()
-        .then(
-            ppo.chain(just(';').ignore_then(ppo2).repeated())
-        )
+        .then(ppo.chain(just(';').ignore_then(ppo2).repeated()))
         .then_ignore(just('.'))
         .map(|(subject, po)| Triple { subject, po })
+}
+
+pub fn parse_base() -> impl Parser<char, Base, Error = Simple<char>> {
+    just("@base")
+        .ignore_then(parse_namednode().map_with_span(spanned).padded())
+        .then_ignore(just('.'))
+        .map(|b| Base(b))
+}
+
+pub fn parse_prefix() -> impl Parser<char, Prefix, Error = Simple<char>> {
+    let string = filter(|c| !(*c as char).is_whitespace() && *c != ':' && *c != '\\')
+        .or(escape())
+        .repeated()
+        .collect::<String>()
+        .map_with_span(spanned)
+        .padded()
+        .labelled("string");
+
+    just("@prefix")
+        .ignore_then(string)
+        .then_ignore(just(":"))
+        .then(parse_namednode().map_with_span(spanned).padded())
+        .then_ignore(just('.'))
+        .map(|(p, c)| Prefix {
+            prefix: p,
+            value: c,
+        })
+}
+
+pub fn parse_turtle() -> impl Parser<char, Turtle, Error = Simple<char>> {
+    parse_base()
+        .map_with_span(spanned).padded()
+        .or_not()
+        .then(parse_prefix().map_with_span(spanned).padded().repeated())
+        .then(parse_triple().map_with_span(spanned).padded().repeated())
+        .map(|((base, prefixes), triples)| Turtle {
+            base,
+            prefixes,
+            triples,
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use crate::turtle::{
+        parse_prefix,
         parser::{parse_blanknode, parse_literal},
-        BlankNode,
+        BlankNode, NamedNode,
     };
     use chumsky::Parser;
 
-    use super::{parse_namednode, parse_triple};
+    use super::{parse_base, parse_namednode, parse_triple, parse_turtle};
 
     #[test]
     fn test_parse_namednode() {
@@ -148,6 +206,15 @@ mod tests {
         assert!(res.is_ok());
         let res = parse_namednode().parse("<test");
         assert!(res.is_err());
+
+        let res = parse_namednode().parse("foaf:name");
+        assert_eq!(
+            res,
+            Ok(NamedNode::Prefixed {
+                prefix: "foaf".to_string(),
+                value: "name".to_string()
+            })
+        )
     }
 
     #[test]
@@ -174,8 +241,9 @@ mod tests {
         let ty = parse_literal()
             .parse("\"test\"^^<typestring>")
             .ok()
-            .and_then(|x| x.ty).map(|x| x.0);
-        assert_eq!(ty, Some("typestring".to_string()));
+            .and_then(|x| x.ty)
+            .map(|x| x);
+        assert_eq!(ty, Some(NamedNode::Full("typestring".to_string())));
     }
 
     #[test]
@@ -188,23 +256,74 @@ mod tests {
 
         let res = parse_triple().parse("<hallo> <daar> \"literal\", \"literal2\"; <daar2> <hier>.");
         assert!(res.is_ok());
+
+        let triple = r#"
+<#green-goblin>
+    rel:enemyOf <#spiderman> ;
+    a foaf:Person ;   
+    foaf:name "Green Goblin" .
+        "#;
+        let res = parse_triple().parse(triple);
+        assert!(res.is_ok());
     }
 
     #[test]
     fn test_parse_triple_bn() {
         let res = parse_triple().parse("<hallo> <intermediate> [ <daar> <hier> ].");
-
         assert!(res.is_ok());
-        if let Ok(x) = res {
-            println!("{}", x);
-        }
 
-        let res = parse_triple().parse("<hallo> <intermediate> [ <daar> <hier>; <daar2> <hier2> ].");
+        let res =
+            parse_triple().parse("<hallo> <intermediate> [ <daar> <hier>; foaf:here <hier2> ].");
         assert!(res.is_ok());
-        if let Ok(x) = res {
-            println!("{}", x);
-        }
+    }
 
-        assert!(false);
+    #[test]
+    fn test_parse_base() {
+        let res = parse_base().parse("@base <test>.");
+        assert!(res.is_ok());
+
+        let res = parse_base().parse("@base <test>");
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_parse_prefix() {
+        let res = parse_prefix().parse("@prefix foaf: <test>.");
+        assert!(res.is_ok());
+
+        let res = res.unwrap();
+        assert_eq!(res.prefix.value(), "foaf");
+
+        let res = parse_prefix().parse("@prefix foaf: <test>");
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_parse_turtle() {
+        let turtle = r#"
+@base <http://example.org/> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix rel: <http://www.perceive.net/schemas/relationship/> .
+
+<#green-goblin>
+    rel:enemyOf <#spiderman> ;
+    a foaf:Person ;   
+    foaf:name "Green Goblin" .
+
+<#spiderman>
+    rel:enemyOf <#green-goblin> ;
+    a foaf:Person ;
+    foaf:name "Spiderman", "Человек-паук"@ru .
+            "#;
+        
+        let res = parse_turtle().parse(turtle);
+        assert!(res.is_ok());
+
+        let res = res.unwrap();
+        println!("{}", res);
+        assert_eq!(res.triples.len(), 2);
+        assert_eq!(res.prefixes.len(), 4);
     }
 }
