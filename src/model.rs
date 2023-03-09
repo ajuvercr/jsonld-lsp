@@ -133,6 +133,7 @@ pub enum JsonToken {
     Str(String),
     Num(f64),
     Array(Vec<usize>),
+    Obj(Vec<usize>),
 }
 
 #[derive(Clone, Debug)]
@@ -182,7 +183,7 @@ impl ParentingSystem {
                         kv_idx
                     })
                     .collect();
-                self.objects[out] = Spanned(JsonToken::Array(children), json.1);
+                self.objects[out] = Spanned(JsonToken::Obj(children), json.1);
             }
         }
 
@@ -301,6 +302,13 @@ impl JsonToken {
     pub fn as_kv(&self) -> Option<(&Spanned<String>, usize)> {
         match self {
             JsonToken::KV(x, y) => Some((&x, *y)),
+            _ => None,
+        }
+    }
+
+    pub fn as_obj(&self) -> Option<&[usize]> {
+        match self {
+            JsonToken::Obj(x) => Some(x),
             _ => None,
         }
     }

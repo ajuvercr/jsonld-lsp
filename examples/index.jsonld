@@ -1,7 +1,8 @@
 {
   "@context": "https://data.vlaanderen.be/doc/applicatieprofiel/sensoren-en-bemonstering/kandidaatstandaard/2022-04-28/context/ap-sensoren-en-bemonstering.jsonld",
-  "@id": "tette",
-  "boob": {
-    "@id": "tette"
-    }
+  "GeneriekeNaam": {"@id": "andere_test"},
+  "@id": "andere_test",
+  "geassocieerdeObservatie": {"@id": "andere_test"},
+  "GeneriekeNaam": {"@id": "andere_test"},
+  "Observatie.geassocieerdeObservatie": {"@id": "andere_test"}
 }

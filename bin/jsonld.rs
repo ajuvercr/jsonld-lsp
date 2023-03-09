@@ -1,103 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
-use iref::IriBuf;
-use json_ld::syntax::context::{definition, FragmentRef, Value};
-use json_ld::{ContextLoader, ReqwestLoader};
+use jsonld_language_server::contexts::{Context, ContextResolver};
 use jsonld_language_server::model::{JsonToken, ParentingSystem};
 use jsonld_language_server::parser::parse;
 use jsonld_language_server::semantics::LEGEND_TYPE;
-use locspan::Location;
 use ropey::Rope;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-
-#[derive(Debug)]
-pub struct ContextResolver {
-    cache: DashMap<String, Context>,
-}
-
-fn get_definition_ref(
-    re: &definition::FragmentRef<Location<IriBuf>, Value<Location<IriBuf>>>,
-) -> Option<Definition> {
-    match re {
-        definition::FragmentRef::Entry(definition::EntryRef::Definition(key, value)) => {
-            let binding = match value.definition.value().as_ref().unwrap() {
-                json_ld::syntax::context::TermDefinitionRef::Simple(s) => s.as_str().to_string(),
-                json_ld::syntax::context::TermDefinitionRef::Expanded(e) => {
-                    e.id.as_ref()
-                        .unwrap()
-                        .as_ref()
-                        .unwrap()
-                        .as_str()
-                        .to_string()
-                }
-            };
-            Some(Definition {
-                key: key.as_str().to_string(),
-                value: binding,
-            })
-        }
-        _ => None,
-    }
-}
-impl ContextResolver {
-    pub fn new() -> Self {
-        Self {
-            cache: DashMap::new(),
-        }
-    }
-
-    fn filter_definition(
-        frag: FragmentRef<Location<IriBuf>, Value<Location<IriBuf>>>,
-    ) -> Option<Definition> {
-        match frag {
-            FragmentRef::DefinitionFragment(x) => get_definition_ref(&x),
-            _ => None,
-        }
-    }
-
-    pub async fn resolve<'a>(&'a self, uri: &str) -> Option<Ref<'a, String, Context>> {
-        if let Some(x) = self.cache.get(uri) {
-            return Some(x);
-        }
-
-        let mut loader = ReqwestLoader::default();
-        let iri = IriBuf::new(uri).ok()?;
-        let context = loader.load_context(iri).await.ok()?;
-
-        let definitions: HashMap<String, Definition> = context
-            .document()
-            .value()
-            .traverse()
-            .filter_map(Self::filter_definition)
-            .map(|x| (x.key.clone(), x))
-            .collect();
-
-        self.cache.insert(uri.to_string(), Context { definitions });
-
-        self.cache.get(uri)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Context {
-    definitions: HashMap<String, Definition>,
-}
-
-impl Context {
-    pub fn merge(&mut self, other: &Self) {
-        self.definitions.extend(other.definitions.clone());
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Definition {
-    key: String,
-    value: String,
-}
 
 #[derive(Debug)]
 struct Backend {
@@ -378,7 +289,7 @@ impl LanguageServer for Backend {
                         kind: Some(CompletionItemKind::VARIABLE),
                         sort_text: Some(w.clone()),
                         filter_text: Some(w.clone()),
-                        detail: Some(format!("@{}", s)),
+                        documentation: Some(Documentation::String(format!("Subject: '{}'", s))),
                         // insert_text: Some(format!("{{\"@id\": \"{}\"}}", s)),
                         text_edit: Some(CompletionTextEdit::Edit(TextEdit {
                             range,
@@ -402,10 +313,10 @@ impl LanguageServer for Backend {
         };
 
         if let Some(ctx) = self.contexts.get(uri.as_str()) {
-            let extra = ctx.definitions.values().map(|v| CompletionItem {
+            let extra = ctx.values().map(|v| CompletionItem {
                 label: v.key.to_string(),
                 kind: Some(CompletionItemKind::PROPERTY),
-                detail: Some(format!("```{} -> {}```", v.key, v.value)),
+                documentation: Some(Documentation::String(format!("\"{}\"", v.value))),
                 insert_text: Some(v.key.to_string()),
                 ..Default::default()
             });
@@ -423,38 +334,6 @@ struct TextDocumentItem {
 }
 
 impl Backend {
-    async fn find_ctx(&self, obj: &ParentingSystem) -> Option<Context> {
-        let context_kv = obj
-            .iter()
-            .map(|(_, x)| x)
-            .filter_map(|x| x.as_kv())
-            .find(|x| x.0.as_str() == "@context")?;
-
-        let context = &obj[context_kv.1];
-
-        if let Some(x) = context.as_str() {
-            self.client
-                .log_message(MessageType::INFO, format!("Resolving context {}", x))
-                .await;
-            return self.resolver.resolve(&x).await?.value().clone().into();
-        }
-
-        if let Some(arr) = context.as_arr() {
-            let mut base: Option<Context> = None;
-            for sol in arr.iter().map(|i| &obj[*i]).filter_map(|x| x.as_str()) {
-                if let Some(con) = self.resolver.resolve(sol).await {
-                    if let Some(x) = base.as_mut() {
-                        x.merge(con.value());
-                    } else {
-                        base = Some(con.value().clone());
-                    }
-                }
-            }
-        }
-
-        None
-    }
-
     fn find_ids(&self, obj: &ParentingSystem) -> HashSet<String> {
         obj.iter()
             .map(|(_, x)| x)
@@ -474,7 +353,7 @@ impl Backend {
         let (json, errors) = parse(&params.text);
         let parenting = ParentingSystem::from_json(json);
 
-        if let Some(ctx) = self.find_ctx(&parenting).await {
+        if let Some(ctx) = self.resolver.resolve(&parenting).await {
             self.contexts.insert(params.uri.to_string(), ctx);
             self.client
                 .log_message(MessageType::INFO, "Found jsonld context")

@@ -1,7 +1,9 @@
 use chumsky::prelude::*;
-use std::ops::Range;
 
-use crate::model::{spanned, Json, Obj, Spanned};
+use crate::{
+    model::{spanned, Json, Obj, Spanned},
+    Error,
+};
 
 pub fn parse(source: &str) -> (Spanned<Json>, Vec<Error>) {
     let (json, errs) = parser().parse_recovery(source);
@@ -47,12 +49,6 @@ pub fn parse(source: &str) -> (Spanned<Json>, Vec<Error>) {
         json.unwrap_or_else(|| Spanned(Json::Invalid, 0..source.len())),
         errors,
     )
-}
-
-#[derive(Debug, PartialEq, Clone, Hash, Eq)]
-pub struct Error {
-    pub msg: String,
-    pub span: Range<usize>,
 }
 
 #[cfg(test)]
@@ -150,12 +146,7 @@ fn parser() -> impl Parser<char, Spanned<Json>, Error = Simple<char>> {
             .then(value)
             .map_with_span(spanned);
 
-        let object = member
-            .clone()
-            .chain(just(',').padded().ignore_then(member).repeated())
-            .or_not()
-            .flatten()
-            .padded()
+        let object = member.recover_with(skip_then_retry_until([','])).padded().separated_by(just(",")).allow_trailing()
             .delimited_by(just('{'), just('}'))
             .collect::<Vec<_>>()
             .map(|arr| Json::Object(Obj(arr)))

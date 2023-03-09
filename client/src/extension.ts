@@ -38,7 +38,6 @@ export async function activate(context: ExtensionContext) {
   let disposable = commands.registerCommand("helloworld.helloWorld", async uri => {
     // The code you place here will be executed every time your command is executed
     // Display a message box to the user
-    const url = Uri.parse('/home/victor/Documents/test-dir/nrs/another.nrs')
     let document = await workspace.openTextDocument(uri);
     await window.showTextDocument(document);
     
@@ -52,7 +51,7 @@ export async function activate(context: ExtensionContext) {
   context.subscriptions.push(disposable);
 
   const traceOutputChannel = window.createOutputChannel("Nrs Language Server trace");
-  const command = process.env.SERVER_PATH || "nrs-language-server";
+  const command = process.env.SERVER_PATH || "jsonld-language-server";
   const run: Executable = {
     command,
     options: {
@@ -72,7 +71,7 @@ export async function activate(context: ExtensionContext) {
   // Options to control the language client
   let clientOptions: LanguageClientOptions = {
     // Register the server for plain text documents
-    documentSelector: [{ scheme: "file", language: "nrs" }],
+    documentSelector: [{ scheme: "file", language: "jsonld" }],
     synchronize: {
       // Notify the server about file changes to '.clientrc files contained in the workspace
       fileEvents: workspace.createFileSystemWatcher("**/.clientrc"),
@@ -81,7 +80,7 @@ export async function activate(context: ExtensionContext) {
   };
 
   // Create the language client and start the client.
-  client = new LanguageClient("nrs-language-server", "nrs language server", serverOptions, clientOptions);
+  client = new LanguageClient("jsonld-language-server", "jsonld language server", serverOptions, clientOptions);
   activateInlayHints(context);
   client.start();
 }
@@ -103,7 +102,7 @@ export function activateInlayHints(ctx: ExtensionContext) {
 
       const event = this.updateHintsEventEmitter.event;
       this.hintsProvider = languages.registerInlayHintsProvider(
-        { scheme: "file", language: "nrs" },
+        { scheme: "file", language: "jsonld" },
         new (class implements InlayHintsProvider {
           onDidChangeInlayHints = event;
           resolveInlayHint(hint: InlayHint, token: CancellationToken): ProviderResult<InlayHint> {

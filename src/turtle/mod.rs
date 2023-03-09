@@ -22,6 +22,7 @@ pub enum NamedNode {
     Full(String),
     Prefixed { prefix: String, value: String },
     A,
+    Invalid,
 }
 impl Display for NamedNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -29,15 +30,33 @@ impl Display for NamedNode {
             NamedNode::Full(x) => write!(f, "<{}>", x),
             NamedNode::Prefixed { prefix, value } => write!(f, "{}:{}", prefix, value),
             NamedNode::A => write!(f, "a"),
+            NamedNode::Invalid => write!(f, "invalid"),
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BlankNode(pub String);
+pub enum BlankNode {
+    Named(String),
+    Unnamed(Vec<Spanned<PO>>),
+    Invalid,
+}
+
 impl Display for BlankNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "_:{}", self.0)
+        match self {
+            BlankNode::Named(x) => write!(f, "_:{}", x),
+            BlankNode::Unnamed(pos) => {
+                write!(f, "[ ")?;
+
+                for po in &pos[1..] {
+                    write!(f, "{} ;", po.value())?;
+                }
+
+                write!(f, " ]")
+            }
+            BlankNode::Invalid => write!(f, "invalid"),
+        }
     }
 }
 
@@ -46,6 +65,7 @@ pub enum Subject {
     BlankNode(BlankNode),
     NamedNode(NamedNode),
 }
+
 impl Display for Subject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -60,13 +80,16 @@ pub enum Term {
     Literal(Literal),
     BlankNode(BlankNode),
     NamedNode(NamedNode),
+    Invalid,
 }
+
 impl Display for Term {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Term::Literal(l) => l.fmt(f),
             Term::BlankNode(b) => b.fmt(f),
             Term::NamedNode(n) => n.fmt(f),
+            Term::Invalid => write!(f, "invalid"),
         }
     }
 }
@@ -76,6 +99,7 @@ pub struct Triple {
     pub subject: Spanned<Subject>,
     pub po: Vec<Spanned<PO>>,
 }
+
 impl Display for Triple {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} {}", self.subject.value(), self.po[0].value())?;
@@ -91,7 +115,7 @@ impl Display for Triple {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PO {
     pub predicate: Spanned<NamedNode>,
-    pub object: Vec<Spanned<O>>,
+    pub object: Vec<Spanned<Term>>,
 }
 impl Display for PO {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -102,44 +126,6 @@ impl Display for PO {
         }
 
         Ok(())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum O {
-    Term(Spanned<Term>),
-    Object(Vec<Spanned<PO>>),
-}
-
-impl O {
-    pub fn is_term(&self) -> bool {
-        match self {
-            O::Term(_) => true,
-            O::Object(_) => false,
-        }
-    }
-
-    pub fn is_bn(&self) -> bool {
-        match self {
-            O::Term(_) => false,
-            O::Object(_) => true,
-        }
-    }
-}
-impl Display for O {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            O::Term(t) => t.fmt(f),
-            O::Object(o) => {
-                write!(f, "[ {}", o[0].value())?;
-
-                for p in &o[1..] {
-                    write!(f, "; {}", p.value())?;
-                }
-
-                write!(f, " ]")
-            }
-        }
     }
 }
 
@@ -166,11 +152,11 @@ impl Display for Prefix {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Turtle {
-    base: Option<Spanned<Base>>,
-    prefixes: Vec<Spanned<Prefix>>,
-    triples: Vec<Spanned<Triple>>,
+    pub base: Option<Spanned<Base>>,
+    pub prefixes: Vec<Spanned<Prefix>>,
+    pub triples: Vec<Spanned<Triple>>,
 }
 impl Display for Turtle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

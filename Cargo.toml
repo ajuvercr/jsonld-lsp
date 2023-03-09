@@ -19,4 +19,15 @@ im-rc = "15.0.0"
 json-ld = { version = "0.12.1", features = ["reqwest"] }
 iref = "2.2.3"
 locspan = "0.7.13"
+async-recursion = "1.0.2"
+smallstr = "0.3.0"
+
+
+[[bin]]
+name = "jsonld-language-server"
+path = "bin/jsonld.rs"
+
+[[bin]]
+name = "turtle-language-server"
+path = "bin/turtle.rs"
 

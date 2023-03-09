@@ -16,21 +16,21 @@
   },
   "enabledApiProposals": [],
   "activationEvents": [
-    "onLanguage:nrs"
+    "onLanguage:jsonld"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "languages": [
       {
-        "id": "nrs",
+        "id": "jsonld",
         "extensions": [
-          ".nrs"
+          ".jsonld"
         ]
       }
     ],
     "configuration": {
       "type": "object",
-      "title": "nrs-language-server",
+      "title": "jsonld-language-server",
       "properties": {
         "nrs-language-server.trace.server": {
           "type": "string",
@@ -81,6 +81,7 @@
     "glob": "^7.1.7",
     "mocha": "^8.0.1",
     "typescript": "^4.4.3",
+    "vsce": "^2.15.0",
     "vscode-test": "^1.4.0",
     "vscode-uri": "^3.0.2",
     "webpack": "^5.75.0",
