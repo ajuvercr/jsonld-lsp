@@ -1,0 +1,69 @@
+{
+  "name": "jsonld-lsp",
+  "publisher": "ajuvercr",
+  "displayName": "jsonld lsp",
+  "description": "VSCode Lsp client for json-ld-lsp",
+  "repository": "https://github.com/ajuvercr/jsonld-lsp/",
+  "version": "0.0.4",
+  "engines": {
+    "vscode": "^1.76.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:jsonld"
+  ],
+  "main": "./out/main.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "jsonld",
+        "extensions": [
+          ".jsonld"
+        ]
+      }
+    ],
+    "grammars": [
+      {
+        "language": "jsonld",
+        "scopeName": "source.json",
+        "path": "./syntaxes/JSON.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "JSON-LD LSP configuration",
+      "properties": {
+        "jsonld-lsp.command": {
+          "description": "JSON-LD LSP executable",
+          "type": "string",
+          "default": "jsonld-language-server"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run esbuild-base -- --minify",
+    "esbuild-base": "esbuild ./src/extension.ts --bundle --outfile=out/main.js --external:vscode --format=cjs --platform=node",
+    "esbuild": "npm run esbuild-base -- --sourcemap",
+    "esbuild-watch": "npm run esbuild-base -- --sourcemap --watch",
+    "test-compile": "tsc -p ./"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.1",
+    "@types/node": "16.x",
+    "@types/vscode": "^1.76.0",
+    "@typescript-eslint/eslint-plugin": "^5.53.0",
+    "@typescript-eslint/parser": "^5.53.0",
+    "@vscode/test-electron": "^2.2.3",
+    "esbuild": "^0.17.11",
+    "eslint": "^8.34.0",
+    "glob": "^8.1.0",
+    "mocha": "^10.2.0",
+    "typescript": "^4.9.5"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^8.1.0"
+  }
+}

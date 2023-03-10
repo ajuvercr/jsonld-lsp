@@ -4,7 +4,7 @@ use dashmap::DashMap;
 use jsonld_language_server::contexts::{Context, ContextResolver};
 use jsonld_language_server::model::{JsonToken, ParentingSystem};
 use jsonld_language_server::parser::parse;
-use jsonld_language_server::semantics::LEGEND_TYPE;
+use jsonld_language_server::semantics::{semantic_tokens, LEGEND_TYPE};
 use ropey::Rope;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::*;
@@ -17,6 +17,8 @@ struct Backend {
     contexts: DashMap<String, Context>,
     ids: DashMap<String, HashSet<String>>,
     document: DashMap<String, (ParentingSystem, Rope)>,
+
+    tokens: DashMap<String, Vec<SemanticToken>>,
 }
 
 #[tower_lsp::async_trait]
@@ -45,6 +47,7 @@ impl LanguageServer for Backend {
                     }),
                     file_operations: None,
                 }),
+                // semantic_tokens_provider: None,
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensRegistrationOptions(
                         SemanticTokensRegistrationOptions {
@@ -181,10 +184,17 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
-        let _uri = params.text_document.uri.to_string();
         self.client
             .log_message(MessageType::LOG, "semantic_token_full")
             .await;
+        self.client.show_message(MessageType::INFO, "Semantic tokens full!").await;
+        let uri = params.text_document.uri.as_str();
+        if let Some(tokens) = self.tokens.get(uri) {
+            return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: None,
+                data: tokens.value().clone(),
+            })));
+        }
         Ok(None)
     }
 
@@ -389,6 +399,9 @@ impl Backend {
             })
             .collect::<Vec<_>>();
 
+        let tokens = semantic_tokens(&parenting, &rope);
+        self.tokens.insert(uri_str.to_string(), tokens);
+
         self.document.insert(uri_str.to_string(), (parenting, rope));
         self.client
             .publish_diagnostics(params.uri.clone(), diagnostics, Some(params.version))
@@ -409,6 +422,7 @@ async fn main() {
     let (service, socket) = LspService::build(|client| Backend {
         client,
         contexts: DashMap::new(),
+        tokens: DashMap::new(),
         resolver: ContextResolver::new(),
         ids: DashMap::new(),
         document: DashMap::new(),
