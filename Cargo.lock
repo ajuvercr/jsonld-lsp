@@ -281,9 +281,9 @@ dependencies = [
 
 [[package]]
 name = "futures"
-version = "0.3.26"
+version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13e2792b0ff0340399d58445b88fd9770e3489eff258a4cbc1523418f12abf84"
+checksum = "531ac96c6ff5fd7c62263c5e3c67a603af4fcaee2e1a0ae5565ba3a11e69e549"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -296,9 +296,9 @@ dependencies = [
 
 [[package]]
 name = "futures-channel"
-version = "0.3.26"
+version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e5317663a9089767a1ec00a487df42e0ca174b61b4483213ac24448e4664df5"
+checksum = "164713a5a0dcc3e7b4b1ed7d3b433cabc18025386f9339346e8daf15963cf7ac"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -306,15 +306,15 @@ dependencies = [
 
 [[package]]
 name = "futures-core"
-version = "0.3.26"
+version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec90ff4d0fe1f57d600049061dc6bb68ed03c7d2fbd697274c41805dcb3f8608"
+checksum = "86d7a0c1aa76363dac491de0ee99faf6941128376f1cf96f07db7603b7de69dd"
 
 [[package]]
 name = "futures-executor"
-version = "0.3.26"
+version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8de0a35a6ab97ec8869e32a2473f4b1324459e14c29275d14b10cb1fd19b50e"
+checksum = "1997dd9df74cdac935c76252744c1ed5794fac083242ea4fe77ef3ed60ba0f83"
 dependencies = [
  "futures-core",
  "futures-task",
@@ -323,15 +323,15 @@ dependencies = [
 
 [[package]]
 name = "futures-io"
-version = "0.3.26"
+version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfb8371b6fb2aeb2d280374607aeabfc99d95c72edfe51692e42d3d7f0d08531"
+checksum = "89d422fa3cbe3b40dca574ab087abb5bc98258ea57eea3fd6f1fa7162c778b91"
 
 [[package]]
 name = "futures-macro"
-version = "0.3.26"
+version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95a73af87da33b5acf53acfebdc339fe592ecf5357ac7c0a7734ab9d8c876a70"
+checksum = "3eb14ed937631bd8b8b8977f2c198443447a8355b6e3ca599f38c975e5a963b6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -340,21 +340,21 @@ dependencies = [
 
 [[package]]
 name = "futures-sink"
-version = "0.3.26"
+version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f310820bb3e8cfd46c80db4d7fb8353e15dfff853a127158425f31e0be6c8364"
+checksum = "ec93083a4aecafb2a80a885c9de1f0ccae9dbd32c2bb54b0c3a65690e0b8d2f2"
 
 [[package]]
 name = "futures-task"
-version = "0.3.26"
+version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcf79a1bf610b10f42aea489289c5a2c478a786509693b80cd39c44ccd936366"
+checksum = "fd65540d33b37b16542a0438c12e6aeead10d4ac5d05bd3f805b8f35ab592879"
 
 [[package]]
 name = "futures-util"
-version = "0.3.26"
+version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c1d6de3acfef38d2be4b1f543f553131788603495be83da675e180c8d6b7bd1"
+checksum = "3ef6b17e481503ec85211fed8f39d1970f128935ca1f814cd32ac4a6842e84ab"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -573,9 +573,9 @@ dependencies = [
 
 [[package]]
 name = "json-ld"
-version = "0.12.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e445d0986fc6a6e8bbe8b2c4ba0c847b7bebd201046cc37df645d632eb4202a"
+checksum = "fa7d3873122ed3dd3b09386ced33a168fe16ebc0e10b438147858ac6390062a6"
 dependencies = [
  "contextual",
  "futures",
@@ -592,9 +592,9 @@ dependencies = [
 
 [[package]]
 name = "json-ld-compaction"
-version = "0.12.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd69243e6b268c66c9cdd6f1aab73bd0d4f6df617d53e8d77238b676a9ab01c3"
+checksum = "2c0a53bb8484b02a3dbe5bba5505edc13c01cdf06106dacaf21a043e25034350"
 dependencies = [
  "contextual",
  "derivative",
@@ -614,9 +614,9 @@ dependencies = [
 
 [[package]]
 name = "json-ld-context-processing"
-version = "0.12.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6162a8b000517178a4a23f546fa7fef31a0cac466393ef922a351d8e6041fb8f"
+checksum = "dfeb8050d4fbba24cd1c43b5b63e9d0e50b2ffb1c83906a360cb738b37517b3a"
 dependencies = [
  "contextual",
  "futures",
@@ -631,9 +631,9 @@ dependencies = [
 
 [[package]]
 name = "json-ld-core"
-version = "0.12.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f103ff1c30bf42b3b7d09c69cbe12869e5ad42497638c5199d83de6fd7d7b13e"
+checksum = "918079788c343357afe7b288b865c97e6bbb6070dbe6322a9773e5ef0161372b"
 dependencies = [
  "bytes",
  "contextual",
@@ -662,9 +662,9 @@ dependencies = [
 
 [[package]]
 name = "json-ld-expansion"
-version = "0.12.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ec3b334e7ae66e64a139ac34f38d3559dd82e7a0deed8891d1897a933a006cc"
+checksum = "c36786722a7ff1a3be0c76d437a93ab622af394b36a9c902a2bd809ae278c79e"
 dependencies = [
  "contextual",
  "derivative",
@@ -683,9 +683,9 @@ dependencies = [
 
 [[package]]
 name = "json-ld-syntax"
-version = "0.12.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fe7e17ed956850ff813815c960dcf3ab80604d72a2590ddebf8112509fb3722"
+checksum = "885c97ef178db5a157d21b2a85bcea95d8ff55074bff3e59e657f782677df05e"
 dependencies = [
  "contextual",
  "decoded-char",
@@ -710,15 +710,14 @@ checksum = "c724484d970b5aabe46934b9571980e255fd50a9ef1b13f23ed2b5c2a19bbb69"
 dependencies = [
  "lexical",
  "ryu-js",
- "serde_json",
  "smallvec",
 ]
 
 [[package]]
 name = "json-syntax"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cb817d295fd9426e34c879863453b93ea4926dbaff762b4ed733515ecca9c6f"
+checksum = "4e3473c7c1719795449173b4d4d89c653598df3ddbc2f32b73bd9ceab8cc2dfb"
 dependencies = [
  "contextual",
  "decoded-char",
@@ -728,7 +727,6 @@ dependencies = [
  "locspan",
  "locspan-derive",
  "ryu-js",
- "serde_json",
  "smallstr",
  "smallvec",
 ]
@@ -741,10 +739,15 @@ dependencies = [
  "chumsky",
  "dashmap",
  "env_logger",
+ "futures",
  "iref",
  "json-ld",
+ "json-ld-syntax",
+ "json-syntax",
  "locspan",
  "log",
+ "mime",
+ "rdf-types",
  "ropey",
  "serde",
  "serde_json",
@@ -1148,9 +1151,9 @@ dependencies = [
 
 [[package]]
 name = "rdf-types"
-version = "0.12.19"
+version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63d95f82a1f30f2d62e77b775ef4863f67ffafef1fc2c95ebfb55f3750be55df"
+checksum = "dd8379b425b9cb069d38c994db5b31af224405c65c7f11e0b085c377fedd1254"
 dependencies = [
  "contextual",
  "iref",

@@ -15,11 +15,16 @@ tower-lsp = { version = "0.17.0"}
 serde = { version = "1.0", features = ["derive"] }
 dashmap = "5.1.0"
 log = "0.4.14"
-json-ld = { version = "0.12.1", features = ["reqwest"] }
 iref = "2.2.3"
 locspan = "0.7.13"
 async-recursion = "1.0.2"
 smallstr = "0.3.0"
+rdf-types = "0.14.2"
+futures = "0.3.27"
+json-ld = { version = "0.14", features = ["reqwest"] }
+json-ld-syntax = "0.14.0"
+json-syntax = "0.9.1"
+mime = "0.3.16"
 
 
 [[bin]]

@@ -1,0 +1,8 @@
+{
+  "@context": {
+    "name": "http://someName",
+    "name2": "http://someName",
+    "name3": "http://someName",
+    "knows": "http://knows"
+  }}
+
