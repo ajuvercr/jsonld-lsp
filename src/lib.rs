@@ -1,6 +1,11 @@
 use std::ops::Range;
 
+use dashmap::DashMap;
+use model::ParentingSystem;
+use ropey::Rope;
+
 pub mod contexts;
+mod loader;
 pub mod model;
 pub mod parser;
 pub mod semantics;
@@ -10,4 +15,39 @@ pub mod turtle;
 pub struct Error {
     pub msg: String,
     pub span: Range<usize>,
+}
+
+pub type Documents = DashMap<String, (ParentingSystem, Rope, Option<String>)>;
+
+#[cfg(test)]
+mod tests {
+    use iref::{Iri, IriRefBuf};
+
+    #[test]
+    fn test_iri_resolve() {
+        let resolved: Result<_, iref::Error> = (|| {
+            let base_iri = Iri::new("http://a/b/c/d;p?q")?;
+            let iri_ref = IriRefBuf::new("tetten")?;
+
+            Ok(iri_ref.resolved(base_iri))
+        })();
+
+        assert!(resolved.is_ok());
+        let resolved = resolved.unwrap();
+        assert_eq!(resolved, "http://a/b/c/tetten");
+    }
+
+    #[test]
+    fn test_iri_resolve_abs() {
+        let resolved: Result<_, iref::Error> = (|| {
+            let base_iri = Iri::new("http://a/b/c/d;p?q")?;
+            let iri_ref = IriRefBuf::new("http://tetten.com")?;
+
+            Ok(iri_ref.resolved(base_iri))
+        })();
+
+        assert!(resolved.is_ok());
+        let resolved = resolved.unwrap();
+        assert_eq!(resolved, "http://tetten.com");
+    }
 }

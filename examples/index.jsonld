@@ -1,8 +1,9 @@
 {
-  "@context": "https://data.vlaanderen.be/doc/applicatieprofiel/sensoren-en-bemonstering/kandidaatstandaard/2022-04-28/context/ap-sensoren-en-bemonstering.jsonld",
+  "@context": "context.jsonld",
   "GeneriekeNaam": {"@id": "andere_t"},
   "Herkomst": "3Dobject",
   "@id": "andere_t",
+  "Bemonsteraar.implementeert": {"@id": "andere_t"},
   "Metadata.dekking": {"@id": "andere_t"},
   "geassocieerdeObservatie": {"@id": "andere_t"},
   "Bemonstering.type": {"@id": "andere_t"},

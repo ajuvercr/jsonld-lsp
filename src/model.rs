@@ -136,6 +136,21 @@ pub enum JsonToken {
     Obj(Vec<usize>),
 }
 
+impl JsonToken {
+    pub fn ty(&self) -> &'static str {
+        match self {
+            JsonToken::Invalid => "invalid",
+            JsonToken::Null => "null",
+            JsonToken::KV(_, _) => "kv",
+            JsonToken::Bool(_) => "bool",
+            JsonToken::Str(_) => "str",
+            JsonToken::Num(_) => "num",
+            JsonToken::Array(_) => "array",
+            JsonToken::Obj(_) => "obj",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ParentingSystem {
     objects: Vec<Spanned<JsonToken>>,

@@ -2,12 +2,20 @@ use std::collections::HashMap;
 use std::ops::{Deref, Range};
 
 use dashmap::DashMap;
-use iref::IriBuf;
+use iref::{IriBuf, PathBuf};
 use json_ld::syntax::context::{definition, FragmentRef, Value};
-use json_ld::{syntax, ReqwestLoader};
+use json_ld::ReqwestLoader;
+use json_ld::{syntax, ExtractContext};
 use locspan::{Meta, Span};
+use rdf_types::vocabulary::IriVocabularyMut;
+use rdf_types::IriVocabulary;
+use tower_lsp::lsp_types::MessageType;
+use tower_lsp::Client;
 
+use crate::loader::LocalCtx;
 use crate::model::{JsonToken, ParentingSystem, Spanned};
+use crate::Documents;
+/// Dynamic parser type.
 
 fn range_to_span(range: &Range<usize>) -> Span {
     Span::new(range.start, range.end)
@@ -104,24 +112,36 @@ impl ContextResolver {
         }
     }
 
-    async fn resolve_remote<'a>(&'a self, uri: &str, context: &mut Context) -> Option<()> {
-        use json_ld::ContextLoader;
-
+    async fn resolve_remote<'a>(
+        &'a self,
+        uri: &str,
+        context: &mut Context,
+        ctx: &'a LocalCtx<'a>,
+        client: Client,
+    ) -> Option<()> {
         if let Some(x) = self.cache.get(uri) {
+            client.log_message(MessageType::INFO, "From cache").await;
             context.merge(x.value());
             return Some(());
         }
 
-        let mut loader = ReqwestLoader::default();
-        let iri = IriBuf::new(uri).ok()?;
-        let loaded = loader
-            .load_context(iri)
-            .await
-            .ok()?
-            .into_document()
-            .into_value();
+        // let mut loader = LocalLoader::from_ctx(ctx);
+        // let mut loader = ReqwestLoader::default();
+        client
+            .log_message(
+                MessageType::INFO,
+                format!("here1 ctx {:?} uri {}", ctx, uri),
+            )
+            .await;
 
-        let definitions: HashMap<String, Definition> = loaded
+        let loaded = ctx.load(uri, &client).await.ok()?.into_document();
+
+        let v = ExtractContext::extract_context(loaded)
+            .map_err(|e| e.to_string())
+            .ok()?;
+        let new_context = v.into_value();
+
+        let definitions: HashMap<String, Definition> = new_context
             .traverse()
             .filter_map(Self::filter_definition)
             .map(|x| (x.key.clone(), x))
@@ -143,7 +163,6 @@ impl ContextResolver {
         context: &mut Context,
         index: usize,
     ) -> Result<(), String> {
-        use json_ld::ExtractContext;
         if let Some(Meta(v, span)) = into_jsonld_value(index, parents) {
             let mut object = syntax::Object::new();
             object.insert(
@@ -153,7 +172,6 @@ impl ContextResolver {
             let root = Meta(syntax::Value::Object(object), span);
 
             let v = ExtractContext::extract_context(root).map_err(|e| e.to_string())?;
-            // if let Ok(v) = ExtractContext::extract_context(root).map_err(|e| e.to_string()) {
             let new_context = v.into_value();
 
             new_context
@@ -171,20 +189,29 @@ impl ContextResolver {
     }
 
     #[async_recursion::async_recursion]
-    async fn resolve_inner_context(
-        &self,
+    async fn resolve_inner_context<'a, 'b: 'a>(
+        &'a self,
         parents: &ParentingSystem,
         index: usize,
         context: &mut Context,
+        ctx: &'a LocalCtx<'a>,
+        client: Client,
     ) {
+        client
+            .log_message(
+                MessageType::INFO,
+                format!("Resolve inner type {}", parents[index].ty()),
+            )
+            .await;
         match parents[index].value() {
             JsonToken::Str(x) => {
-                self.resolve_remote(x, context).await;
+                self.resolve_remote(x, context, ctx, client).await;
                 return;
             }
             JsonToken::Array(ix) => {
                 for i in ix {
-                    self.resolve_inner_context(parents, *i, context).await;
+                    self.resolve_inner_context(parents, *i, context, ctx, client.clone())
+                        .await;
                 }
                 return;
             }
@@ -200,8 +227,38 @@ impl ContextResolver {
         }
     }
 
-    pub async fn resolve<'a>(&'a self, obj: &ParentingSystem) -> Option<Context> {
+    fn get_root(uri: &str) -> &str {
+        let uri = uri.strip_prefix("file://").unwrap_or(uri);
+        uri
+    }
+
+    pub async fn resolve<'a>(
+        &'a self,
+        obj: &ParentingSystem,
+        documents: &Documents,
+        uri: &str,
+        client: Client,
+    ) -> Option<Context> {
         let mut out = Context::default();
+
+        let root = uri;
+
+        client.log_message(MessageType::INFO, "got root").await;
+
+        let base = obj
+            .iter()
+            .filter_map(|x| x.1.as_kv())
+            .filter(|x| x.0.value() == "@base")
+            .find_map(|x| obj[x.1].as_str())
+            .unwrap_or(root);
+
+        client
+            .log_message(MessageType::INFO, format!("extracted base {:?}", base))
+            .await;
+
+        let ctx = LocalCtx::new(base, documents).unwrap();
+
+        client.log_message(MessageType::INFO, "got ctx").await;
 
         let root = obj[0].as_obj()?;
 
@@ -211,7 +268,7 @@ impl ContextResolver {
             .filter_map(|x| x.as_kv())
             .filter(|x| x.0.as_str() == "@context")
         {
-            self.resolve_inner_context(obj, remote_context.1, &mut out)
+            self.resolve_inner_context(obj, remote_context.1, &mut out, &ctx, client.clone())
                 .await;
         }
 

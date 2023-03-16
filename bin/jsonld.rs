@@ -5,6 +5,7 @@ use jsonld_language_server::contexts::{Context, ContextResolver};
 use jsonld_language_server::model::{JsonToken, ParentingSystem};
 use jsonld_language_server::parser::parse;
 use jsonld_language_server::semantics::{semantic_tokens, LEGEND_TYPE};
+use jsonld_language_server::Documents;
 use ropey::Rope;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::*;
@@ -16,7 +17,7 @@ struct Backend {
     resolver: ContextResolver,
     contexts: DashMap<String, Context>,
     ids: DashMap<String, HashSet<String>>,
-    document: DashMap<String, (ParentingSystem, Rope)>,
+    document: Documents,
 
     tokens: DashMap<String, Vec<SemanticToken>>,
 }
@@ -187,7 +188,9 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::LOG, "semantic_token_full")
             .await;
-        self.client.show_message(MessageType::INFO, "Semantic tokens full!").await;
+        self.client
+            .show_message(MessageType::INFO, "Semantic tokens full!")
+            .await;
         let uri = params.text_document.uri.as_str();
         if let Some(tokens) = self.tokens.get(uri) {
             return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
@@ -214,9 +217,19 @@ impl LanguageServer for Backend {
             .await;
     }
 
-    async fn did_change_watched_files(&self, _: DidChangeWatchedFilesParams) {
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        let s = params
+            .changes
+            .iter()
+            .map(|x| x.uri.as_str())
+            .collect::<Vec<&str>>()
+            .join(", ");
+
         self.client
-            .log_message(MessageType::INFO, "watched files have changed!")
+            .log_message(
+                MessageType::INFO,
+                format!("watched files have changed! {}", s),
+            )
             .await;
     }
 
@@ -236,8 +249,12 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         self.client
-            .log_message(MessageType::INFO, "file opened!")
+            .log_message(
+                MessageType::INFO,
+                format!("file opened! {}", params.text_document.uri.as_str()),
+            )
             .await;
+
         self.on_change(TextDocumentItem {
             uri: params.text_document.uri,
             text: params.text_document.text,
@@ -253,7 +270,10 @@ impl LanguageServer for Backend {
             .map(|x| x.text.len())
             .collect();
         self.client
-            .log_message(MessageType::INFO, format!("did change! {:?}", ev))
+            .log_message(
+                MessageType::INFO,
+                format!("did change! {} {:?}", params.text_document.uri.as_str(), ev),
+            )
             .await;
 
         self.on_change(TextDocumentItem {
@@ -363,14 +383,14 @@ impl Backend {
         let (json, errors) = parse(&params.text);
         let parenting = ParentingSystem::from_json(json);
 
-        if let Some(ctx) = self.resolver.resolve(&parenting).await {
+        let uri_str = params.uri.as_str();
+        if let Some(ctx) = self.resolver.resolve(&parenting, &self.document, uri_str, self.client.clone()).await {
             self.contexts.insert(params.uri.to_string(), ctx);
             self.client
                 .log_message(MessageType::INFO, "Found jsonld context")
                 .await;
         }
 
-        let uri_str = params.uri.as_str();
         if !self.ids.contains_key(uri_str) {
             self.ids.insert(uri_str.to_string(), HashSet::default());
         }
@@ -402,7 +422,22 @@ impl Backend {
         let tokens = semantic_tokens(&parenting, &rope);
         self.tokens.insert(uri_str.to_string(), tokens);
 
-        self.document.insert(uri_str.to_string(), (parenting, rope));
+        let st = diagnostics.is_empty().then_some(params.text);
+
+        if let Some(mut x) = self.document.get_mut(uri_str) {
+            // &mut (a, b, c)
+            // (&mut a, &mut b, &mut c)
+            let (ref mut a, ref mut b, ref mut c) = *x;
+
+            if st.is_some() {
+                *c = st;
+            }
+
+            *a = parenting;
+            *b = rope;
+        } else {
+            self.document.insert(uri_str.to_string(), (parenting, rope, st));
+        }
         self.client
             .publish_diagnostics(params.uri.clone(), diagnostics, Some(params.version))
             .await;
