@@ -1,7 +1,10 @@
 use std::{
     borrow::Borrow,
-    ops::{Deref, Index, Range},
+    ops::{Deref, Index, IndexMut, Range},
 };
+
+use json_ld::syntax;
+use locspan::{Meta, Span};
 
 #[derive(Debug, Clone)]
 pub struct Spanned<T>(pub T, pub Range<usize>);
@@ -62,12 +65,15 @@ impl<T> Spanned<T> {
     pub fn value(&self) -> &T {
         &self.0
     }
+    pub fn value_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
     pub fn span(&self) -> &Range<usize> {
         &self.1
     }
 }
 
-pub type ObjMember = (Spanned<String>, Spanned<Json>);
+pub type ObjMember = Option<(Spanned<String>, Spanned<Json>)>;
 
 #[derive(Clone, Debug)]
 pub struct Obj(pub Vec<Spanned<ObjMember>>);
@@ -86,8 +92,9 @@ impl Obj {
     {
         self.0
             .iter()
-            .find(|x| x.value().0.value() == s)
-            .map(|x| &x.value().1)
+            .flat_map(|x| x.value())
+            .find(|x| x.0.value() == s)
+            .map(|x| &x.1)
     }
 }
 
@@ -108,8 +115,9 @@ impl<'a> ObjRef<'a> {
     {
         self.0
             .into_iter()
-            .find(|x| x.value().0.value() == s)
-            .map(|x| &x.value().1)
+            .flat_map(|x| x.value())
+            .find(|x| x.0.value() == s)
+            .map(|x| &x.1)
     }
 }
 
@@ -164,8 +172,54 @@ impl Index<usize> for ParentingSystem {
         &self.objects[index]
     }
 }
+impl IndexMut<usize> for ParentingSystem {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.objects[index]
+    }
+}
+
+fn range_to_span(range: &Range<usize>) -> Span {
+    Span::new(range.start, range.end)
+}
 
 impl ParentingSystem {
+    pub fn jsonld_value(&self, obj: usize) -> Option<Meta<syntax::Value<Span>, Span>> {
+        type V = syntax::Value<Span>;
+        let Spanned(ref t, ref range) = self[obj];
+        let span = Span::new(range.start, range.end);
+
+        let v = match t {
+            JsonToken::Invalid => return None,
+            JsonToken::KV(_, _) => return None,
+            JsonToken::Null => V::Null,
+            JsonToken::Bool(x) => V::Boolean(*x),
+            JsonToken::Str(x) => V::from(x.as_str()),
+            JsonToken::Num(x) => syntax::Value::try_from(*x).ok()?,
+            JsonToken::Array(arr) => {
+                V::Array(arr.iter().flat_map(|id| self.jsonld_value(*id)).collect())
+            }
+            JsonToken::Obj(arr) => {
+                let mut object = syntax::Object::new();
+                arr.iter()
+                    .flat_map(|&id| {
+                        let (k, v) = self[id].as_kv()?;
+                        let key = Meta(k.value().as_str().into(), range_to_span(k.span()));
+
+                        let value = self.jsonld_value(v)?;
+
+                        Some(syntax::object::Entry { key, value })
+                    })
+                    .for_each(|x| {
+                        object.push_entry(x);
+                    });
+
+                V::Object(object)
+            }
+        };
+
+        Some(Meta(v, span))
+    }
+
     fn add(&mut self, json: Spanned<Json>, parent: usize) -> usize {
         let out = self.parents.len();
 
@@ -187,13 +241,17 @@ impl ParentingSystem {
                 let children: Vec<_> = obj
                     .0
                     .into_iter()
-                    .map(|Spanned((k, v), span)| {
+                    .map(|Spanned(m, span)| {
                         let kv_idx = self.parents.len();
                         self.parents.push(out);
-                        self.objects.push(Spanned(JsonToken::Invalid, 0..0));
+                        if let Some((k, v)) = m {
+                            self.objects.push(Spanned(JsonToken::Invalid, 0..0));
 
-                        let v = self.add(v, kv_idx);
-                        self.objects[kv_idx] = Spanned(JsonToken::KV(k, v), span);
+                            let v = self.add(v, kv_idx);
+                            self.objects[kv_idx] = Spanned(JsonToken::KV(k, v), span);
+                        } else {
+                            self.objects.push(Spanned(JsonToken::Invalid, span));
+                        }
 
                         kv_idx
                     })

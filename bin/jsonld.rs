@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
 
 use dashmap::DashMap;
-use jsonld_language_server::contexts::{Context, ContextResolver};
+use json_ld::Print;
+use jsonld_language_server::contexts::CtxResolver;
 use jsonld_language_server::model::{JsonToken, ParentingSystem};
 use jsonld_language_server::parser::parse;
 use jsonld_language_server::semantics::{semantic_tokens, LEGEND_TYPE};
@@ -11,11 +13,12 @@ use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+use log::debug;
+
 #[derive(Debug)]
 struct Backend {
     client: Client,
-    resolver: ContextResolver,
-    contexts: DashMap<String, Context>,
+    contexts: CtxResolver,
     ids: DashMap<String, HashSet<String>>,
     document: Documents,
 
@@ -169,12 +172,7 @@ impl LanguageServer for Backend {
                     }
                 }
 
-                self.client
-                    .show_message(
-                        MessageType::INFO,
-                        format!("Found (pos {} ) {:?}", pos, item),
-                    )
-                    .await;
+                debug!("Found (pos {} ) {:?}", pos, item);
             }
         }
 
@@ -185,12 +183,7 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
-        self.client
-            .log_message(MessageType::LOG, "semantic_token_full")
-            .await;
-        self.client
-            .show_message(MessageType::INFO, "Semantic tokens full!")
-            .await;
+        debug!("semantic tokens full");
         let uri = params.text_document.uri.as_str();
         if let Some(tokens) = self.tokens.get(uri) {
             return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
@@ -331,27 +324,21 @@ impl LanguageServer for Backend {
                 .collect();
 
             let filters: Vec<_> = out.iter().flat_map(|x| &x.filter_text).collect();
-            self.client
-                .show_message(
-                    MessageType::INFO,
-                    format!("filter {:?} ids {:?}", filters, ids),
-                )
-                .await;
+            debug!("filter {:?} ids {:?}", filters, ids);
             out
         } else {
             Vec::new()
         };
 
-        if let Some(ctx) = self.contexts.get(uri.as_str()) {
-            let extra = ctx.values().map(|v| CompletionItem {
-                label: v.key.to_string(),
-                kind: Some(CompletionItemKind::PROPERTY),
-                documentation: Some(Documentation::String(format!("\"{}\"", v.value))),
-                insert_text: Some(v.key.to_string()),
-                ..Default::default()
-            });
-            completions.extend(extra);
-        }
+        let ctx = self.contexts.resolve(&uri, &self.document).await;
+        let extra = ctx.values().map(|v| CompletionItem {
+            label: v.key.to_string(),
+            kind: Some(CompletionItemKind::PROPERTY),
+            documentation: Some(Documentation::String(format!("\"{}\"", v.value))),
+            insert_text: Some(v.key.to_string()),
+            ..Default::default()
+        });
+        completions.extend(extra);
 
         Ok(Some(CompletionResponse::Array(completions)))
     }
@@ -376,20 +363,18 @@ impl Backend {
     }
 
     async fn on_change(&self, params: TextDocumentItem) -> Option<()> {
-        self.client
-            .log_message(MessageType::INFO, "Start on_change")
-            .await;
+        log::debug!("start on change");
 
         let (json, errors) = parse(&params.text);
         let parenting = ParentingSystem::from_json(json);
 
-        let uri_str = params.uri.as_str();
-        if let Some(ctx) = self.resolver.resolve(&parenting, &self.document, uri_str, self.client.clone()).await {
-            self.contexts.insert(params.uri.to_string(), ctx);
-            self.client
-                .log_message(MessageType::INFO, "Found jsonld context")
-                .await;
+        if let Some(json) = parenting.jsonld_value(0) {
+            log::debug!("Found json {}", json.pretty_print());
+        } else {
+            log::debug!("Found no valid json");
         }
+
+        let uri_str = params.uri.as_str();
 
         if !self.ids.contains_key(uri_str) {
             self.ids.insert(uri_str.to_string(), HashSet::default());
@@ -422,43 +407,33 @@ impl Backend {
         let tokens = semantic_tokens(&parenting, &rope);
         self.tokens.insert(uri_str.to_string(), tokens);
 
-        let st = diagnostics.is_empty().then_some(params.text);
-
-        if let Some(mut x) = self.document.get_mut(uri_str) {
-            // &mut (a, b, c)
-            // (&mut a, &mut b, &mut c)
-            let (ref mut a, ref mut b, ref mut c) = *x;
-
-            if st.is_some() {
-                *c = st;
-            }
-
-            *a = parenting;
-            *b = rope;
-        } else {
-            self.document.insert(uri_str.to_string(), (parenting, rope, st));
-        }
+        self.document.insert(uri_str.to_string(), (parenting, rope));
         self.client
             .publish_diagnostics(params.uri.clone(), diagnostics, Some(params.version))
             .await;
-        self.client
-            .log_message(MessageType::INFO, "finished on_change")
-            .await;
+
+        log::debug!("finished on change");
         Some(())
     }
 }
 #[tokio::main]
 async fn main() {
-    env_logger::init();
+    let target = match File::create("/tmp/json_ld-lsp.txt") {
+        Ok(x) => env_logger::Target::Pipe(Box::new(x)),
+        Err(_) => env_logger::Target::Stderr,
+    };
+
+    env_logger::Builder::from_default_env()
+        .target(target)
+        .init();
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
     let (service, socket) = LspService::build(|client| Backend {
         client,
-        contexts: DashMap::new(),
+        contexts: CtxResolver::default(),
         tokens: DashMap::new(),
-        resolver: ContextResolver::new(),
         ids: DashMap::new(),
         document: DashMap::new(),
     })
