@@ -31,7 +31,4 @@ mime = "0.3.16"
 name = "jsonld-language-server"
 path = "bin/jsonld.rs"
 
-[[bin]]
-name = "turtle-language-server"
-path = "bin/turtle.rs"
 
