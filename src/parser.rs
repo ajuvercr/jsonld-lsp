@@ -79,6 +79,12 @@ mod tests {
     }
 }
 
+fn munch<T: Clone>(c: char) -> impl Parser<char, Option<T>, Error = Simple<char>> {
+    let munch = none_of(c).repeated().to(None);
+
+    munch
+}
+
 // Source: https://github.com/zesterer/chumsky/blob/master/examples/json.rs
 fn parser() -> impl Parser<char, Spanned<Json>, Error = Simple<char>> {
     recursive(|value| {
@@ -144,9 +150,15 @@ fn parser() -> impl Parser<char, Spanned<Json>, Error = Simple<char>> {
             .map_with_span(spanned)
             .then_ignore(just(':').padded())
             .then(value)
+            .map(|x| Some(x))
+            .recover_with(skip_parser(munch(',')))
             .map_with_span(spanned);
 
-        let object = member.recover_with(skip_then_retry_until([','])).padded().separated_by(just(",")).allow_trailing()
+        let object = member
+            .padded()
+            .separated_by(just(','))
+            .allow_trailing()
+            .padded()
             .delimited_by(just('{'), just('}'))
             .collect::<Vec<_>>()
             .map(|arr| Json::Object(Obj(arr)))

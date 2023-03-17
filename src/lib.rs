@@ -5,7 +5,6 @@ use model::ParentingSystem;
 use ropey::Rope;
 
 pub mod contexts;
-mod loader;
 pub mod model;
 pub mod parser;
 pub mod semantics;
@@ -17,7 +16,7 @@ pub struct Error {
     pub span: Range<usize>,
 }
 
-pub type Documents = DashMap<String, (ParentingSystem, Rope, Option<String>)>;
+pub type Documents = DashMap<String, (ParentingSystem, Rope)>;
 
 #[cfg(test)]
 mod tests {

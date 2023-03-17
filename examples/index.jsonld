@@ -1,11 +1,28 @@
 {
-  "@context": "context.jsonld",
-  "GeneriekeNaam": {"@id": "andere_t"},
+  "@context": [
+    "ap-sensoren-en-bemonstering.jsonld",
+    {
+      "foaf": "test/name"
+    }
+  ],
+  "GeneriekeNaam": {
+    "@id": "andere_t"
+  },
   "Herkomst": "3Dobject",
   "@id": "andere_t",
-  "Bemonsteraar.implementeert": {"@id": "andere_t"},
-  "Metadata.dekking": {"@id": "andere_t"},
-  "geassocieerdeObservatie": {"@id": "andere_t"},
-  "Bemonstering.type": {"@id": "andere_t"},
-  "Observatie.geassocieerdeObservatie": {"@id": "andere_t"}
+  "Bemonsteraar.implementeert": {
+    "@id": "andere_t"
+  },
+  "Metadata.dekking": {
+    "@id": "andere_t"
+  },
+  "geassocieerdeObservatie": {
+    "@id": "andere_t"
+  },
+  "Bemonstering.type": {
+    "@id": "andere_t"
+  },
+  "Observatie.geassocieerdeObservatie": {
+    "@id": "andere_t"
+  }
 }
