@@ -1,5 +1,5 @@
 use ropey::Rope;
-use tower_lsp::lsp_types::{SemanticToken, SemanticTokenType};
+use crate::lsp_types::{SemanticToken, SemanticTokenType};
 
 use crate::model::{JsonToken, ParentingSystem};
 

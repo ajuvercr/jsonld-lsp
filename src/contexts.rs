@@ -3,17 +3,15 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 
 use dashmap::DashMap;
-use iref::Iri;
 use json_ld::syntax::context::{definition, FragmentRef, Value};
-use json_ld::{syntax, ContextLoader, ExtractContext, ReqwestLoader};
+use json_ld::{syntax, ExtractContext};
 use locspan::{Meta, Span};
 use log::{debug, error, info};
 use ropey::Rope;
-use tokio::fs::read_to_string;
-use tower_lsp::lsp_types::Url;
+
+use crate::lsp_types::Url;
 
 use crate::model::{JsonToken, ParentingSystem};
-use crate::parser::parse;
 use crate::Documents;
 
 #[derive(Default)]
@@ -31,6 +29,7 @@ impl std::fmt::Debug for CtxResolver {
                     Ok(_) => Cow::Borrowed("Loaded"),
                     Err(RemoteError::LoaderFail(i)) => Cow::Owned(format!("LoadFailed({})", i)),
                     Err(RemoteError::InvalidIri) => Cow::Borrowed("Loaded"),
+                    Err(RemoteError::Offline) => Cow::Borrowed("Offline"),
                 };
                 format!("{}: {}", x.key(), v)
             })
@@ -52,7 +51,9 @@ impl CtxResolver {
     }
 }
 
+#[allow(unused)]
 enum RemoteError {
+    Offline,
     InvalidIri,
     LoaderFail(u16),
 }
@@ -63,44 +64,58 @@ struct Resolver<'a> {
     done: HashSet<String>,
 }
 
-async fn try_load_remote(uri: &str) -> Result<Context, RemoteError> {
-    let mut loader = ReqwestLoader::default();
-    let iri = Iri::from_str(uri)
-        .map_err(|_| RemoteError::InvalidIri)?
-        .to_owned();
+async fn try_load_remote(_uri: &str) -> Result<Context, RemoteError> {
+    cfg_if::cfg_if! { if #[cfg(req)] {
+        let uri = _uri;
+        let mut loader = json_ld::ReqwestLoader::default();
+        let iri = Iri::from_str(uri)
+            .map_err(|_| RemoteError::InvalidIri)?
+            .to_owned();
 
-    let doc = loader
-        .load_context(iri)
-        .await
-        .map_err(|_| RemoteError::LoaderFail(1))?;
+        let doc = loader
+            .load_context(iri)
+            .await
+            .map_err(|_| RemoteError::LoaderFail(1))?;
 
-    let definitions: HashMap<String, Definition> = doc
-        .into_document()
-        .into_value()
-        .traverse()
-        .filter_map(filter_definition)
-        .map(|x| (x.key.clone(), x))
-        .collect();
+        let definitions: HashMap<String, Definition> = doc
+            .into_document()
+            .into_value()
+            .traverse()
+            .filter_map(filter_definition)
+            .map(|x| (x.key.clone(), x))
+            .collect();
 
-    Ok(Context {
-        definitions,
-        ..Default::default()
-    })
+        Ok(Context {
+            definitions,
+            ..Default::default()
+        })
+    } else {
+         Err(RemoteError::Offline)
+
+    }
+        }
 }
 
-async fn load_file(uri: &Url) -> Option<(ParentingSystem, Rope)> {
-    debug!("loading file {}", uri);
-    if uri.scheme() != "file" {
-        return None;
+async fn load_file(_uri: &Url) -> Option<(ParentingSystem, Rope)> {
+    cfg_if::cfg_if! {
+        if #[cfg(req)] {
+            let uri = _uri;
+            debug!("loading file {}", uri);
+            if uri.scheme() != "file" {
+                return None;
+            }
+            let path = uri.to_file_path().ok()?;
+            let st = read_to_string(path).await.ok()?;
+
+            let (json, _) = parse(&st);
+            let parenting = ParentingSystem::from_json(json);
+
+            debug!("succeeded");
+            Some((parenting, Rope::from_str(&st)))
+        } else {
+            None
+        }
     }
-    let path = uri.to_file_path().ok()?;
-    let st = read_to_string(path).await.ok()?;
-
-    let (json, _) = parse(&st);
-    let parenting = ParentingSystem::from_json(json);
-
-    debug!("succeeded");
-    Some((parenting, Rope::from_str(&st)))
 }
 
 impl<'a> Resolver<'a> {
@@ -218,6 +233,7 @@ impl<'a> Resolver<'a> {
                         }
                     }
                     Err(RemoteError::InvalidIri) => {}
+                    Err(RemoteError::Offline) => {}
                 }
             } else {
                 let new_context = try_load_remote(uri.as_str()).await;
