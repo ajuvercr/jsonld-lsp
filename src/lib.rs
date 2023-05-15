@@ -21,11 +21,10 @@ pub struct Error {
 pub type Documents = DashMap<String, (ParentingSystem, Rope)>;
 
 #[cfg(feature = "bin")]
-pub use tower_lsp::lsp_types as lsp_types;
+pub use tower_lsp::lsp_types;
 
 #[cfg(not(feature = "bin"))]
-pub use lsp_types as lsp_types;
-
+pub use lsp_types;
 
 #[cfg(test)]
 mod tests {

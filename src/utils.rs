@@ -1,7 +1,6 @@
 use crate::lsp_types::{Position, Range};
 use ropey::Rope;
 
-
 pub fn offset_to_position(offset: usize, rope: &Rope) -> Option<Position> {
     let line = rope.try_char_to_line(offset).ok()?;
     let first_char = rope.try_line_to_char(line).ok()?;

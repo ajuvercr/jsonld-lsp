@@ -1,5 +1,5 @@
-use ropey::Rope;
 use crate::lsp_types::{SemanticToken, SemanticTokenType};
+use ropey::Rope;
 
 use crate::model::{JsonToken, ParentingSystem};
 
@@ -49,25 +49,28 @@ pub fn semantic_tokens(system: &ParentingSystem, rope: &Rope) -> Vec<SemanticTok
     let mut pre_line = 0;
     let mut pre_start = 0;
 
-    tokens.into_iter().flat_map(|token| {
-        let line = rope.try_byte_to_line(token.start as usize).ok()? as u32;
-        let first = rope.try_line_to_char(line as usize).ok()? as u32;
-        let start = rope.try_byte_to_char(token.start as usize).ok()? as u32 - first;
-        let delta_line = line - pre_line;
-        let delta_start = if delta_line == 0 {
-            start - pre_start
-        } else {
-            start
-        };
-        let ret = Some(SemanticToken {
-            delta_line,
-            delta_start,
-            length: token.length as u32,
-            token_type: token.ty as u32,
-            token_modifiers_bitset: 0,
-        });
-        pre_line = line;
-        pre_start = start;
-        ret
-    }).collect()
+    tokens
+        .into_iter()
+        .flat_map(|token| {
+            let line = rope.try_byte_to_line(token.start as usize).ok()? as u32;
+            let first = rope.try_line_to_char(line as usize).ok()? as u32;
+            let start = rope.try_byte_to_char(token.start as usize).ok()? as u32 - first;
+            let delta_line = line - pre_line;
+            let delta_start = if delta_line == 0 {
+                start - pre_start
+            } else {
+                start
+            };
+            let ret = Some(SemanticToken {
+                delta_line,
+                delta_start,
+                length: token.length as u32,
+                token_type: token.ty as u32,
+                token_modifiers_bitset: 0,
+            });
+            pre_line = line;
+            pre_start = start;
+            ret
+        })
+        .collect()
 }

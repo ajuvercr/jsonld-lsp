@@ -89,3 +89,4 @@ impl WebBackend {
 gen!(initialize prepare_rename rename semantic_tokens_full completion);
 
 gen2!(did_open did_change did_save);
+
