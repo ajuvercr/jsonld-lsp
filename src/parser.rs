@@ -1,4 +1,4 @@
-use chumsky::prelude::*;
+use chumsky::{prelude::*, primitive::Container};
 
 use crate::{
     model::{spanned, Json, Obj, Spanned},
@@ -79,7 +79,7 @@ mod tests {
     }
 }
 
-fn munch<T: Clone>(c: char) -> impl Parser<char, Option<T>, Error = Simple<char>> {
+fn munch<T: Clone, C: Container<char>>(c: C) -> impl Parser<char, Option<T>, Error = Simple<char>> {
     let munch = none_of(c).repeated().to(None);
 
     munch
@@ -151,7 +151,7 @@ fn parser() -> impl Parser<char, Spanned<Json>, Error = Simple<char>> {
             .then_ignore(just(':').padded())
             .then(value)
             .map(|x| Some(x))
-            .recover_with(skip_parser(munch(',')))
+            .recover_with(skip_parser(munch(",}")))
             .map_with_span(spanned);
 
         let object = member

@@ -1,30 +1,26 @@
-# JSON-LD LSP
+# LSP web extension Example
 
-## Features
+Json-LD LSP VScode web extension.
 
-- Autocompletion based on JSON-LD context.
-- Autocomplete subject identifiers start by writing '@'
-- Rename functionality for subjects.
+## Structure
 
-## Requirements
+```
+.
+├── client // Language Client
+│   ├── src
+│   │   └── browserClientMain.ts // Language Client entry point
+├── package.json // The extension manifest.
+└── server // Language Server
+    └── src
+        └── browserServerMain.ts // Language Server entry point
+```
 
-Install the LSP: 
+## Running the Sample
 
-
-**Cargo**
-
-cargo install --git https://github.com/ajuvercr/jsonld-lsp/ --bin jsonld-language-server
-
-
-**Binaries**
-
-Install binary from [Gitbub](https://github.com/ajuvercr/jsonld-lsp/).
-
-
-## Settings
-
-- Optional: "jsonld-lsp.command": set the command for the JSON-LD lsp (default: jsonld-language-server)
-- Optional: "editor.semanticHighlighting.enabled": enable semantic highlighting
-
-![Semantic tokens highlighting](./img/tokens.png)
-
+- Run `npm install` in this folder. This installs all necessary npm modules in both the client and server folder
+- Open VS Code on this folder.
+- Press Ctrl+Shift+B to compile the client and server.
+- Switch to the Debug viewlet.
+- Select `Launch Client` from the drop down.
+- Run the launch config.
+- If you want to debug the server as well use the launch configuration `Attach to Server`
