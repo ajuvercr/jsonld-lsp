@@ -3,11 +3,12 @@ use crate::lsp_types::*;
 use crate::model::{JsonToken, ParentingSystem};
 use crate::parser::parse;
 use crate::semantics::{semantic_tokens, LEGEND_TYPE};
-use crate::utils::{offset_to_position, offsets_to_range, position_to_offset};
+use crate::utils::{offset_to_position, offsets_to_range, position_to_offset, Resp};
 use crate::Documents;
 use dashmap::DashMap;
 use json_ld::Print;
 use log::debug;
+use reqwest::header::HeaderValue;
 use ropey::Rope;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
@@ -43,7 +44,7 @@ impl Client for tower_lsp::Client {
 
 #[derive(Debug)]
 pub struct Backend<C: Client> {
-    client: C,
+    pub client: C,
     contexts: CtxResolver,
     ids: DashMap<String, HashSet<String>>,
     document: Documents,
@@ -85,7 +86,7 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
                             text_document_registration_options: {
                                 TextDocumentRegistrationOptions {
                                     document_selector: Some(vec![DocumentFilter {
-                                        language: Some("jsonld".to_string()),
+                                        language: Some("plaintext".to_string()),
                                         scheme: Some("file".to_string()),
                                         pattern: None,
                                     }]),
@@ -275,6 +276,7 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
             .iter()
             .map(|x| x.text.len())
             .collect();
+
         self.client
             .log_message(
                 MessageType::INFO,
@@ -343,7 +345,21 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
             Vec::new()
         };
 
-        let ctx = self.contexts.resolve(&uri, &self.document).await;
+        self.client
+            .log_message(MessageType::INFO, format!("Resolving context {}", uri))
+            .await;
+
+        let local_files: Vec<_> = self.document.iter().map(|x| x.key().to_string()).collect();
+        self.client
+            .log_message(MessageType::INFO, format!("local files {:?}", local_files))
+            .await;
+        let ctx = self
+            .contexts
+            .resolve(&uri, &self.document, &self.client)
+            .await;
+        self.client
+            .log_message(MessageType::INFO, format!("Ctx resolved {}", uri))
+            .await;
         let extra = ctx.values().map(|v| CompletionItem {
             label: v.key.to_string(),
             kind: Some(CompletionItemKind::PROPERTY),
@@ -404,15 +420,17 @@ impl<C: Client> Backend<C> {
 
         let ids = self.find_ids(&parenting);
 
+        let rope = Rope::from_str(&params.text);
         if !errors.is_empty() {
             if let Some(mut p) = self.ids.get_mut(uri_str) {
                 p.value_mut().extend(ids);
             }
         } else {
             self.ids.insert(params.uri.to_string(), ids);
+            let tokens = semantic_tokens(&parenting, &rope);
+            self.tokens.insert(uri_str.to_string(), tokens);
         }
 
-        let rope = Rope::from_str(&params.text);
         let diagnostics = errors
             .into_iter()
             .filter_map(|item| {
@@ -425,9 +443,6 @@ impl<C: Client> Backend<C> {
                 ))
             })
             .collect::<Vec<_>>();
-
-        let tokens = semantic_tokens(&parenting, &rope);
-        self.tokens.insert(uri_str.to_string(), tokens);
 
         self.document.insert(uri_str.to_string(), (parenting, rope));
         self.client

@@ -29,12 +29,28 @@ json-syntax = "0.9.1"
 mime = "0.3.16"
 lsp-types = "0.94.0"
 cfg-if = "1.0.0"
-wasm-bindgen = { version = "0.2.84", features = ["serde", "serde-serialize", "serde_json"] }
+wasm-bindgen = { version = "0.2.86", features = ["serde", "serde-serialize", "serde_json"] }
 serde-wasm-bindgen = "0.5.0"
 wasm-bindgen-futures = "0.4.34"
+js-sys = "0.3.63"
+reqwest = "0.11.18"
+once_cell = "1.17.1"
+bytes = "1.4.0"
+hashbrown = "0.13.2"
 
+[dependencies.web-sys]
+version = "0.3.63"
+features = [
+  'Headers',
+  'Request',
+  'RequestInit',
+  'RequestMode',
+  'Response',
+  'Window',
+]
 
 [features]
+default = ["bin"]
 bin = ["tokio", "req"]
 req = ["json-ld/reqwest"]
 

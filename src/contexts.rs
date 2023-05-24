@@ -7,11 +7,14 @@ use json_ld::syntax::context::{definition, FragmentRef, Value};
 use json_ld::{syntax, ExtractContext};
 use locspan::{Meta, Span};
 use log::{debug, error, info};
+use lsp_types::{MessageActionItemProperty, MessageType};
 use ropey::Rope;
 
+use crate::backend::Client;
 use crate::lsp_types::Url;
 
 use crate::model::{JsonToken, ParentingSystem};
+use crate::utils::ReqwestLoader;
 use crate::Documents;
 
 #[derive(Default)]
@@ -40,14 +43,19 @@ impl std::fmt::Debug for CtxResolver {
 }
 
 impl CtxResolver {
-    pub async fn resolve(&self, uri: &Url, documents: &Documents) -> Context {
+    pub async fn resolve<C: Client + Sync>(
+        &self,
+        uri: &Url,
+        documents: &Documents,
+        c: &C,
+    ) -> Context {
         let mut res = Resolver {
             remote_contexts: &self.remote_contexts,
             documents,
             done: HashSet::new(),
         };
 
-        res.get_context(uri).await
+        res.get_context(uri, c).await
     }
 }
 
@@ -64,36 +72,34 @@ struct Resolver<'a> {
     done: HashSet<String>,
 }
 
-async fn try_load_remote(_uri: &str) -> Result<Context, RemoteError> {
-    cfg_if::cfg_if! { if #[cfg(req)] {
-        let uri = _uri;
-        let mut loader = json_ld::ReqwestLoader::default();
-        let iri = Iri::from_str(uri)
-            .map_err(|_| RemoteError::InvalidIri)?
-            .to_owned();
+async fn try_load_remote<C: Client + Sync>(uri: &str, c: &C) -> Result<Context, RemoteError> {
+    use json_ld::ContextLoader;
+    let uri = uri;
+    let mut loader = ReqwestLoader::default();
+    let iri = iref::Iri::from_str(uri)
+        .map_err(|_| RemoteError::InvalidIri)?
+        .to_owned();
 
-        let doc = loader
-            .load_context(iri)
-            .await
-            .map_err(|_| RemoteError::LoaderFail(1))?;
+    c.log_message(MessageType::INFO, format!("Correct iri {}", uri))
+        .await;
 
-        let definitions: HashMap<String, Definition> = doc
-            .into_document()
-            .into_value()
-            .traverse()
-            .filter_map(filter_definition)
-            .map(|x| (x.key.clone(), x))
-            .collect();
+    let doc = loader
+        .load_context(iri)
+        .await
+        .map_err(|_| RemoteError::LoaderFail(1))?;
 
-        Ok(Context {
-            definitions,
-            ..Default::default()
-        })
-    } else {
-         Err(RemoteError::Offline)
+    let definitions: HashMap<String, Definition> = doc
+        .into_document()
+        .into_value()
+        .traverse()
+        .filter_map(filter_definition)
+        .map(|x| (x.key.clone(), x))
+        .collect();
 
-    }
-        }
+    Ok(Context {
+        definitions,
+        ..Default::default()
+    })
 }
 
 async fn load_file(_uri: &Url) -> Option<(ParentingSystem, Rope)> {
@@ -119,25 +125,26 @@ async fn load_file(_uri: &Url) -> Option<(ParentingSystem, Rope)> {
 }
 
 impl<'a> Resolver<'a> {
-    async fn get_context(&mut self, uri: &Url) -> Context {
+    async fn get_context<C: Client + Sync>(&mut self, uri: &Url, c: &C) -> Context {
         let mut out = Context::default();
-        self._get_context(uri, &mut out).await;
+        self._get_context(uri, &mut out, c).await;
         return out;
     }
 
     #[async_recursion::async_recursion]
-    async fn _get_context_from_value(
+    async fn _get_context_from_value<C: Client + Sync>(
         &mut self,
         uri: &Url,
         context: &mut Context,
         token: usize,
         parents: &ParentingSystem,
+        c: &C,
     ) {
         match parents[token].value() {
             JsonToken::Str(s) => {
                 if let Ok(joined) = uri.join(s.as_str()) {
                     debug!("Recursive! looking for uri {}", joined);
-                    self._get_context(&joined, context).await;
+                    self._get_context(&joined, context, c).await;
                 } else {
                     error!("Failed to join! ({}.join({}))", uri, s);
                 }
@@ -145,7 +152,7 @@ impl<'a> Resolver<'a> {
             JsonToken::Array(arr) => {
                 debug!("Found array (len {})", arr.len());
                 for i in arr {
-                    self._get_context_from_value(uri, context, *i, parents)
+                    self._get_context_from_value(uri, context, *i, parents, c)
                         .await;
                 }
             }
@@ -174,19 +181,27 @@ impl<'a> Resolver<'a> {
     }
 
     #[async_recursion::async_recursion]
-    async fn _get_context(&mut self, uri: &Url, context: &mut Context) {
+    async fn _get_context<C: Client + Sync>(&mut self, uri: &Url, context: &mut Context, c: &C) {
         if self.done.contains(uri.as_str()) {
-            info!("Infinite loop averted");
+            c.log_message(MessageType::INFO, format!("infinite loop averted {}", uri))
+                .await;
             return;
         }
 
         self.done.insert(uri.to_string());
-        debug!("Get context for {}", uri);
+        c.log_message(MessageType::INFO, format!("Get context for {}", uri))
+            .await;
 
         if uri.scheme() == "file" {
             debug!("which is a file");
             // Get that thing!
             if !self.documents.contains_key(uri.as_str()) {
+                c.log_message(
+                    MessageType::INFO,
+                    format!("Got to load local file {}", uri.as_str()),
+                )
+                .await;
+
                 if let Some(item) = load_file(uri).await {
                     self.documents.insert(uri.as_str().to_string(), item);
                 }
@@ -209,12 +224,19 @@ impl<'a> Resolver<'a> {
                     debug!("Using base {}", base);
 
                     if let Some(inner_ctx) = find("@context") {
-                        self._get_context_from_value(&base, context, inner_ctx, doc)
+                        c.log_message(MessageType::INFO, format!("Found context {}", inner_ctx))
+                            .await;
+                        self._get_context_from_value(&base, context, inner_ctx, doc, c)
+                            .await;
+                    } else {
+                        c.log_message(MessageType::INFO, format!("Didn't find context"))
                             .await;
                     }
                 }
             }
         } else {
+            c.log_message(MessageType::INFO, "Remote context".to_string())
+                .await;
             debug!("which is a remote");
             if let Some(mut remote) = self.remote_contexts.get_mut(uri.as_str()) {
                 debug!("that we already found once (ok {})", remote.is_ok());
@@ -222,7 +244,7 @@ impl<'a> Resolver<'a> {
                     Ok(x) => context.merge(&x),
                     Err(RemoteError::LoaderFail(tr)) => {
                         if *tr < 5 {
-                            let new_context = try_load_remote(uri.as_str())
+                            let new_context = try_load_remote(uri.as_str(), c)
                                 .await
                                 .map_err(|_| RemoteError::LoaderFail(*tr + 1));
                             if let Ok(x) = &new_context {
@@ -236,7 +258,12 @@ impl<'a> Resolver<'a> {
                     Err(RemoteError::Offline) => {}
                 }
             } else {
-                let new_context = try_load_remote(uri.as_str()).await;
+                let new_context = try_load_remote(uri.as_str(), c).await;
+                c.log_message(
+                    MessageType::INFO,
+                    format!("Found new context {}", new_context.is_ok()),
+                )
+                .await;
                 if let Ok(x) = &new_context {
                     context.merge(&x);
                 }
