@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="icon" href="./favicon.png" />
+		<meta name="viewport" content="width=device-width" />
+		<meta http-equiv="content-security-policy" content="">
+		<link href="./_app/immutable/assets/0.53dd1931.css" rel="stylesheet">
+		<link href="./_app/immutable/assets/2.9514c83f.css" rel="stylesheet">
+		<link rel="modulepreload" href="./_app/immutable/entry/start.b000cf06.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/index.f2252846.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/singletons.e915e0a9.js">
+		<link rel="modulepreload" href="./_app/immutable/entry/app.6de0011e.js">
+		<link rel="modulepreload" href="./_app/immutable/nodes/0.b536b4a3.js">
+		<link rel="modulepreload" href="./_app/immutable/nodes/2.89c39db4.js">
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<div style="display: contents">
+
+
+<br>
+<header class="container"><hgroup><h1>JSON-LD Language Server Demo</h1>
+    <h2>Simple demo application that shows the power and usefulness of adding LSP
+      support to JSON-LD.
+    </h2></hgroup></header>
+
+<main class="container"><section id="editor"><h2>Editor</h2>
+    <div class="scm-waiting  svelte-kcx0g9"><div class="scm-waiting__loading scm-loading svelte-kcx0g9"><div class="scm-loading__spinner svelte-kcx0g9"></div>
+            <p class="scm-loading__text svelte-kcx0g9">Loading editor...</p></div>
+
+        <pre class="scm-pre cm-editor svelte-kcx0g9">
+{
+  "@context": "https://raw.githubusercontent.com/json-ld/json-ld.org/main/contexts/person.jsonld",
+  "@id": "http://example.com/me",
+  "knows": {"@id": "http://example.com/you"}
+}
+</pre></div>
+    <br>
+    <p>The editor will provide autocompletion on properties defined in the linked
+      person.jsonld context. This will be done very greedily but still a
+      productivity boost is present.
+    </p>
+    <p>Autocompletion on defined identifiers can be issued by typing <strong>@</strong>.
+    </p>
+    <p>Syntax errors are also gathered by the language server.</p>
+    <p>This editor is powered by the json-ld. The editor itself uses the
+      codemirror components. A thin wrapper links the codemirror editor with the
+      LSP. The LSP itself is compiled to WebAssembly and loaded on the page.
+    </p></section>
+  <section id="install"><h2>Editor compatibility</h2>
+    The main benifit of a LSP is that it can be installed on many platforms. NeoVim
+    only requires some configuration because the Language Server protocol is native
+    to the editor. Other editors like VSCode require a little bit more work to, to
+    create an extension for each supported Language Server, this is considered to
+    be a thin wrapper.
+
+    <div class="flow svelte-1wmpp3r"><article class="article svelte-1wmpp3r"><img class="logo svelte-1wmpp3r" src="https://www.shanebart.com/wp-content/uploads/2019/05/5k4h36j3h4j.png" alt="Visual Studio Code Logo">
+        <h2 class="svelte-1wmpp3r">VS Code</h2>
+        <p class="svelte-1wmpp3r">Installing the language server for VS Code is as simple as installing
+          the correct extensions. This extension is called jsonld lsp and can be
+          found on <a target="_blank" href="https://marketplace.visualstudio.com/items?itemName=ajuvercr.jsonld-lsp" class="svelte-1wmpp3r">the marketplace</a>.
+        </p>
+        <p class="svelte-1wmpp3r">Creating the extension is done with special care to make it a, so
+          called, web extension. This makes it also possible to use this
+          extension on online VS code instances like <a target="_blank" href="https://vscode.dev" class="svelte-1wmpp3r">vscode.dev</a>.
+        </p></article>
+      <article class="article svelte-1wmpp3r"><img class="logo svelte-1wmpp3r" src="https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Neovim-logo.svg/2560px-Neovim-logo.svg.png" alt="Neovim Logo">
+        <h2 class="svelte-1wmpp3r">NeoVim</h2>
+        <p class="svelte-1wmpp3r">NeoVim has native support for Language Servers. NeoVim starts up a
+          binary and communicates with it via stdin and stdout. To enable the
+          JSON-LD LSP, please install it with cargo. The NeoVim lsp integration
+          has a dependency on the LSP binary.
+        </p>
+        <details class="svelte-1wmpp3r"><summary class="svelte-1wmpp3r">Lua configuration</summary>
+          
+  <pre data-language="lua" class=" svelte-11sh29b"><code class="hljs"><!-- HTML_TAG_START -->#  Add a <span class="hljs-built_in">config</span> to lspconfig.configs
+<span class="hljs-keyword">local</span> configs = <span class="hljs-built_in">require</span>(<span class="hljs-string">&quot;lspconfig.configs&quot;</span>)
+
+configs.jsonld = {
+  default_config = {
+    cmd = { <span class="hljs-string">&#x27;jsonld-language-server&#x27;</span> },
+    filetypes = { <span class="hljs-string">&#x27;jsonld&#x27;</span> },
+    root_dir = <span class="hljs-built_in">require</span>(<span class="hljs-string">&quot;lspconfig.util&quot;</span>)
+      .find_git_ancestor,
+    single_file_support = <span class="hljs-literal">true</span>,
+    init_options = {},
+  }
+}
+
+# Start the LSP
+<span class="hljs-keyword">local</span> lspconfig = <span class="hljs-built_in">require</span>(<span class="hljs-string">&quot;lspconfig&quot;</span>)
+
+lspconfig.jsonld.setup {
+  on_attach = M.on_attach,
+  capabilities = M.capabilities,
+}<!-- HTML_TAG_END --></code></pre>
+</details></article></div></section>
+</main>
+
+
+			
+			<script>
+				{
+					__sveltekit_1ccigkb = {
+						assets: "/jsonld-lsp",
+						base: new URL(".", location).pathname.slice(0, -1),
+						env: {}
+					};
+
+					const element = document.currentScript.parentElement;
+
+					const data = [null,null];
+
+					Promise.all([
+						import("./_app/immutable/entry/start.b000cf06.js"),
+						import("./_app/immutable/entry/app.6de0011e.js")
+					]).then(([kit, app]) => {
+						kit.start(app, element, {
+							node_ids: [0, 2],
+							data,
+							form: null,
+							error: null
+						});
+					});
+				}
+			</script>
+		</div>
+	</body>
+</html>
