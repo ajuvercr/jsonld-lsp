@@ -217,7 +217,7 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
                 .get_or_init(|| Data::new(&self.options, vocabulary));
             let mut redirection_number = 0;
 
-            'next_url: loop {
+            loop {
                 if redirection_number > self.options.max_redirections {
                     return Err(Error::TooManyRedirections);
                 }
@@ -236,9 +236,9 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
                             .map(|x| x.to_str().unwrap().split(";").map(|x| x.trim()).collect())
                             .unwrap_or_default();
                         //
-                        match content_type.iter().find(|x| is_json_ld(*x)) {
-                            Some(content_type) => {
-                                let mut context_url = None;
+                        match content_type.iter().next() {
+                            Some(_) => {
+                                let context_url = None;
                                 // if *content_type != "application/ld+json" {
                                 //     for link in resp.headers.get(LINK).into_iter() {
                                 //         if let Some(link) = Link::new(link) {
@@ -329,6 +329,7 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
                     }
                     _code if status.is_redirection() => match resp.headers.get("location") {
                         Some(location) => {
+                            redirection_number += 1;
                             let u = Iri::new(location.as_bytes())
                                 .map_err(Error::InvalidRedirectionUrl)?;
                             url = vocabulary.insert(u);
