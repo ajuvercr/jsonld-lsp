@@ -5,6 +5,8 @@ pub use loader::*;
 mod fetch;
 pub use fetch::*;
 
+pub mod web_types;
+
 use crate::lsp_types::{Position, Range};
 use ropey::Rope;
 

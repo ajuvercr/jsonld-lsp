@@ -263,11 +263,15 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
             .await;
 
         self.on_change(TextDocumentItem {
-            uri: params.text_document.uri,
+            uri: params.text_document.uri.clone(),
             text: params.text_document.text,
             version: params.text_document.version,
         })
         .await;
+
+        self.contexts
+            .resolve(&params.text_document.uri, &self.document, &self.client)
+            .await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -310,9 +314,13 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
             .as_ref()
             .and_then(|x| x.trigger_character.clone());
 
+        self.client
+            .log_message(MessageType::INFO, format!("trigger char {:?}", ctx))
+            .await;
+
         let uri = params.text_document_position.text_document.uri;
 
-        let mut completions = if let (Some("@"), Some(ids)) =
+        if let (Some("@"), Some(ids)) =
             (ctx.as_ref().map(|x| x.as_str()), self.ids.get(uri.as_str()))
         {
             let end = params.text_document_position.position;
@@ -340,10 +348,10 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
 
             let filters: Vec<_> = out.iter().flat_map(|x| &x.filter_text).collect();
             debug!("filter {:?} ids {:?}", filters, ids);
-            out
-        } else {
-            Vec::new()
-        };
+            return Ok(Some(CompletionResponse::Array(out)));
+        }
+
+        let mut completions = Vec::new();
 
         self.client
             .log_message(MessageType::INFO, format!("Resolving context {}", uri))
@@ -353,13 +361,16 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
         self.client
             .log_message(MessageType::INFO, format!("local files {:?}", local_files))
             .await;
+
         let ctx = self
             .contexts
             .resolve(&uri, &self.document, &self.client)
             .await;
+
         self.client
             .log_message(MessageType::INFO, format!("Ctx resolved {}", uri))
             .await;
+
         let extra = ctx.values().map(|v| CompletionItem {
             label: v.key.to_string(),
             kind: Some(CompletionItemKind::PROPERTY),

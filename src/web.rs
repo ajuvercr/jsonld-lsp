@@ -1,8 +1,8 @@
-use crate::{backend::Client, lsp_types::*};
+use crate::{backend::Client, lsp_types::*, utils::web_types as wt};
 use serde::Serializer;
 use serde_json::json;
 use tower_lsp::LanguageServer;
-use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
 
 use crate::backend::Backend;
 
@@ -55,16 +55,23 @@ impl WebClient {
 }
 
 #[wasm_bindgen]
-pub fn set_logger(f: js_sys::Function) {
+pub fn init_panic_hook() {
+    console_error_panic_hook::set_once();
+}
+
+#[wasm_bindgen]
+pub fn set_logger(f: wt::SetLoggerFn) {
     unsafe {
-        LOG_FN = Some(f);
+        let jsvalue: JsValue = f.into();
+        LOG_FN = Some(jsvalue.unchecked_into());
     }
 }
 
 #[wasm_bindgen]
-pub fn set_diags(f: js_sys::Function) {
+pub fn set_diags(f: wt::SetDiagnosticsFn) {
     unsafe {
-        DIAGS_FN = Some(f);
+        let jsvalue: JsValue = f.into();
+        DIAGS_FN = Some(jsvalue.unchecked_into());
     }
 }
 
@@ -103,13 +110,15 @@ impl Client for WebClient {
 }
 
 macro_rules! gen {
-    ($($tail:tt)*) => {
+    ($($fn:tt $ty:path)* ) => {
         #[wasm_bindgen]
         impl WebBackend {
             $(
-            pub async fn $tail(&self, params: JsValue) -> Result<JsValue, JsValue> {
-                let params = serde_wasm_bindgen::from_value(params)?;
-                let out = self.inner.$tail(params).await.map_err(|_| format!("{} failed", stringify!($tail)))?;
+            pub async fn $fn(&self, params: $ty) -> Result<JsValue, JsValue> {
+                log_message(format!("Running {}", stringify!($fn)).into())?;
+                let params = serde_wasm_bindgen::from_value(params.into())?;
+                let out = self.inner.$fn(params).await
+                    .map_err(|e| format!("{} failed {}", stringify!($fn), e.to_string()))?;
                 let out = SER.serialize_some(&out)?;
                 Ok(out)
             }
@@ -119,20 +128,20 @@ macro_rules! gen {
 }
 
 macro_rules! gen2 {
-    ($($no_ret:tt)*) => {
+    ($($fn:tt $ty:path)*) => {
         #[wasm_bindgen]
         impl WebBackend {
             $(
-            pub async fn $no_ret(&self, params: JsValue) -> Result<JsValue, JsValue> {
-                log_message(format!("Running {}", stringify!($no_ret)).into())?;
-                let params = match serde_wasm_bindgen::from_value(params) {
+            pub async fn $fn(&self, params: $ty) -> Result<JsValue, JsValue> {
+                log_message(format!("Running {}", stringify!($fn)).into())?;
+                let params = match serde_wasm_bindgen::from_value(params.into()) {
                     Ok(x) => x,
                     Err(e) => {
                         log_message(format!("Error {}", e).into())?;
                         return Err(e.to_string().into());
                     }
                 };
-                self.inner.$no_ret(params).await;
+                self.inner.$fn(params).await;
                 Ok("Ok".to_string().into())
             }
             )*
@@ -153,24 +162,8 @@ impl WebBackend {
             inner: Backend::new(client),
         }
     }
-
-    // pub async fn testing(&self) -> Result<JsValue, JsValue> {
-    //     let resp = self
-    //         .inner
-    //         .client
-    //         .fetch(
-    //             "https://jsonplaceholder.typicode.com/todos/1",
-    //             &HashMap::new(),
-    //         )
-    //         .await
-    //         .map_err(|_| "")?;
-    //
-    //     let _ = log_message(format!("got {:?}", resp).into());
-    //
-    //     Ok("".into())
-    // }
 }
 
-gen!(initialize prepare_rename rename semantic_tokens_full completion);
+gen!(initialize wt::InitializeParams prepare_rename wt::PrepareRenameParams  rename wt::RenameParams semantic_tokens_full wt::SemanticTokensParams completion wt::CompletionParams);
 
-gen2!(did_open did_change did_save);
+gen2!(did_open  wt::DidOpenTextDocumentParams did_change wt::DidChangeTextDocumentParams did_save wt::DidSaveTextDocumentParams);
