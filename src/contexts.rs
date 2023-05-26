@@ -192,7 +192,43 @@ impl<'a> Resolver<'a> {
         c.log_message(MessageType::INFO, format!("Get context for {}", uri))
             .await;
 
-        if uri.scheme() == "file" {
+        if uri.scheme() == "http" || uri.scheme() == "https" {
+            c.log_message(MessageType::INFO, "Remote context".to_string())
+                .await;
+            debug!("which is a remote");
+            if let Some(mut remote) = self.remote_contexts.get_mut(uri.as_str()) {
+                debug!("that we already found once (ok {})", remote.is_ok());
+                match remote.value_mut() {
+                    Ok(x) => context.merge(&x),
+                    Err(RemoteError::LoaderFail(tr)) => {
+                        if *tr < 5 {
+                            let new_context = try_load_remote(uri.as_str(), c)
+                                .await
+                                .map_err(|_| RemoteError::LoaderFail(*tr + 1));
+                            if let Ok(x) = &new_context {
+                                context.merge(&x);
+                            }
+
+                            *remote = new_context;
+                        }
+                    }
+                    Err(RemoteError::InvalidIri) => {}
+                    Err(RemoteError::Offline) => {}
+                }
+            } else {
+                let new_context = try_load_remote(uri.as_str(), c).await;
+                c.log_message(
+                    MessageType::INFO,
+                    format!("Found new context {}", new_context.is_ok()),
+                )
+                .await;
+                if let Ok(x) = &new_context {
+                    context.merge(&x);
+                }
+                debug!("looked it up (ok {})", new_context.is_ok());
+                self.remote_contexts.insert(uri.to_string(), new_context);
+            }
+        } else {
             debug!("which is a file");
             // Get that thing!
             if !self.documents.contains_key(uri.as_str()) {
@@ -233,42 +269,6 @@ impl<'a> Resolver<'a> {
                             .await;
                     }
                 }
-            }
-        } else {
-            c.log_message(MessageType::INFO, "Remote context".to_string())
-                .await;
-            debug!("which is a remote");
-            if let Some(mut remote) = self.remote_contexts.get_mut(uri.as_str()) {
-                debug!("that we already found once (ok {})", remote.is_ok());
-                match remote.value_mut() {
-                    Ok(x) => context.merge(&x),
-                    Err(RemoteError::LoaderFail(tr)) => {
-                        if *tr < 5 {
-                            let new_context = try_load_remote(uri.as_str(), c)
-                                .await
-                                .map_err(|_| RemoteError::LoaderFail(*tr + 1));
-                            if let Ok(x) = &new_context {
-                                context.merge(&x);
-                            }
-
-                            *remote = new_context;
-                        }
-                    }
-                    Err(RemoteError::InvalidIri) => {}
-                    Err(RemoteError::Offline) => {}
-                }
-            } else {
-                let new_context = try_load_remote(uri.as_str(), c).await;
-                c.log_message(
-                    MessageType::INFO,
-                    format!("Found new context {}", new_context.is_ok()),
-                )
-                .await;
-                if let Ok(x) = &new_context {
-                    context.merge(&x);
-                }
-                debug!("looked it up (ok {})", new_context.is_ok());
-                self.remote_contexts.insert(uri.to_string(), new_context);
             }
         }
     }

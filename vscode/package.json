@@ -1,31 +1,48 @@
 {
-	"name": "lsp-web-extension-sample",
-	"description": "A language server in a web extension",
+	"name": "jsonld-lsp",
+	"publisher": "ajuvercr",
+	"displayName": "jsonld lsp",
+	"description": "A language server and language definition for JSON-LD",
 	"author": "Microsoft Corporation",
 	"license": "MIT",
-	"version": "1.0.0",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/Microsoft/vscode-extension-samples"
-	},
-	"publisher": "vscode-samples",
-	"categories": [],
-	"keywords": [
-		"multi-root ready"
+	"version": "0.0.6",
+	"repository": "https://github.com/ajuvercr/jsonld-lsp/",
+	"categories": [
+		"Other"
 	],
 	"engines": {
 		"vscode": "^1.43.0"
 	},
 	"activationEvents": [
-		"onLanguage:plaintext"
+		"onLanguage:jsonld"
 	],
 	"browser": "./client/dist/browserClientMain",
 	"contributes": {
+		"languages": [
+			{
+				"id": "jsonld",
+				"extensions": [
+					".jsonld"
+				],
+				"aliases": [
+          "json-ld",
+					"json+ld"
+				],
+				"configuration": "./language-configuration.json"
+			}
+		],
+		"grammars": [
+			{
+				"language": "jsonld",
+				"scopeName": "source.json",
+				"path": "./grammar.json"
+			}
+		],
 		"configuration": [
 			{
 				"order": 22,
-				"id": "lsp-web-extension-sample",
-				"title": "lsp-web-extension-sample",
+				"id": "jsonld lsp",
+				"title": "jsonld lsp",
 				"properties": {
 					"lsp-web-extension-sample.trace.server": {
 						"type": "string",
@@ -35,7 +52,7 @@
 							"messages",
 							"verbose"
 						],
-						"default": "verbose",
+						"default": "messages",
 						"description": "Traces the communication between VS Code and the lsp-web-extension-sample language server."
 					}
 				}
@@ -61,9 +78,6 @@
 		"ts-loader": "^9.3.0",
 		"typescript": "^5.0.2",
 		"webpack": "^5.75.0",
-		"vscode-web-wasm-webpack-plugin": "file:vscode-web-wasm-webpack-plugin",
 		"webpack-cli": "^4.7.2"
-	},
-	"dependencies": {
 	}
 }

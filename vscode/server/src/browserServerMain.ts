@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 import { createConnection, BrowserMessageReader, BrowserMessageWriter } from 'vscode-languageserver/browser';
 
-import { InitializeParams, TextDocumentPositionParams, PrepareRenameParams, SemanticTokensParams, DidOpenTextDocumentParams } from 'vscode-languageserver';
+import { InitializeParams, TextDocumentPositionParams, PrepareRenameParams, SemanticTokensParams, DidOpenTextDocumentParams, RenameParams } from 'vscode-languageserver';
 
 import init, { WebClient, WebBackend, set_logger, set_diags} from 'jsonld-language-server';
 
@@ -63,7 +63,7 @@ connection.onPrepareRename(async (x: PrepareRenameParams) => {
 	return await server?.prepare_rename(x);
 });
 
-connection.onRenameRequest(async (x: PrepareRenameParams) => {
+connection.onRenameRequest(async (x: RenameParams) => {
 	return await server?.rename(x);
 });
 

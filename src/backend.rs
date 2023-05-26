@@ -68,10 +68,6 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
                     all_commit_characters: None,
                     completion_item: None,
                 }),
-                execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: vec!["dummy.do_something".to_string()],
-                    work_done_progress_options: Default::default(),
-                }),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                         supported: Some(true),
@@ -86,7 +82,7 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
                             text_document_registration_options: {
                                 TextDocumentRegistrationOptions {
                                     document_selector: Some(vec![DocumentFilter {
-                                        language: Some("plaintext".to_string()),
+                                        language: Some("jsonld".to_string()),
                                         scheme: Some("file".to_string()),
                                         pattern: None,
                                     }]),
