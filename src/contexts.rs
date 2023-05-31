@@ -299,7 +299,7 @@ fn get_definition_ref<M: Send + Sync + Clone>(
     }
 }
 
-fn filter_definition<M: Sync + Send + Clone>(frag: FragmentRef<M, Value<M>>) -> Option<Definition> {
+pub fn filter_definition<M: Sync + Send + Clone>(frag: FragmentRef<M, Value<M>>) -> Option<Definition> {
     match frag {
         FragmentRef::DefinitionFragment(x) => get_definition_ref(&x),
         _ => None,

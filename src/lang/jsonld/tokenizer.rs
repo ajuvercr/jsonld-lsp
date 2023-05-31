@@ -197,7 +197,7 @@ mod tests {
     fn parse_num() {
         let (tokens, errs) = tokenize(" 423");
         let tokens: Vec<_> = tokens.into_iter().map(|x| x.into_value()).collect();
-        assert_eq!(tokens, vec![Num(423, 0)]);
+        assert_eq!(tokens, vec![Num(423, None)]);
         assert!(errs.is_empty());
     }
 }
