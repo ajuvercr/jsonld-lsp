@@ -783,6 +783,7 @@ version = "0.1.0"
 dependencies = [
  "as_variant",
  "async-recursion",
+ "async-trait",
  "bytes",
  "cfg-if",
  "chumsky",

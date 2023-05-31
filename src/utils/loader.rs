@@ -2,16 +2,13 @@
 use bytes::Bytes;
 use futures::future::{BoxFuture, FutureExt};
 use hashbrown::HashSet;
-use iref::{Iri};
+use iref::Iri;
 use json_ld::{Loader, Profile, RemoteDocument};
 use locspan::{Meta, Span};
 use mime::Mime;
 use once_cell::sync::OnceCell;
 use rdf_types::{vocabulary::Index, IriVocabulary, IriVocabularyMut};
-use reqwest::{
-    header::{CONTENT_TYPE},
-    StatusCode,
-};
+use reqwest::{header::CONTENT_TYPE, StatusCode};
 use std::{collections::HashMap, fmt, hash::Hash, str::FromStr, string::FromUtf8Error};
 
 use super::fetch::fetch;
@@ -83,6 +80,8 @@ pub struct ReqwestLoader<
     parser: Box<DynParser<I, M, T, E>>,
     options: Options<I>,
     data: OnceCell<Data>,
+
+    cache: HashMap<I, Bytes>,
 }
 
 impl<I, M, T, E> ReqwestLoader<I, M, T, E> {
@@ -108,7 +107,14 @@ impl<I, M, T, E> ReqwestLoader<I, M, T, E> {
             parser: Box::new(parser),
             options,
             data: OnceCell::new(),
+            cache: HashMap::new(),
         }
+    }
+}
+
+impl<I: Eq + Hash, T, M, E> ReqwestLoader<I, M, T, E> {
+    pub fn set_document(&mut self, i: I, b: impl Into<Bytes>) {
+        self.cache.insert(i, b.into());
     }
 }
 
@@ -194,6 +200,10 @@ impl<M> fmt::Display for ParseError<M> {
     }
 }
 
+fn is_json_ld(this: &str) -> bool {
+    this == "application/json" || this == "application/ld+json"
+}
+
 impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, E> Loader<I, M>
     for ReqwestLoader<I, M, T, E>
 {
@@ -209,6 +219,20 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
         I: 'a,
     {
         async move {
+            if let Some(bytes) = self.cache.get(&url) {
+                let document = (*self.parser)(vocabulary, &url, bytes.clone()).map_err(Error::Parse)?;
+
+                let document = RemoteDocument::new_full(
+                    Some(url),
+                    Some(Mime::from_str("application/json+ld").unwrap()),
+                    None,
+                    HashSet::new(),
+                    document,
+                );
+
+                return Ok(document);
+            }
+
             let data = self
                 .data
                 .get_or_init(|| Data::new(&self.options, vocabulary));
@@ -235,48 +259,23 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
                         //
                         match content_type.iter().next() {
                             Some(_) => {
-                                let context_url = None;
-                                // if *content_type != "application/ld+json" {
-                                //     for link in resp.headers.get(LINK).into_iter() {
-                                //         if let Some(link) = Link::new(link) {
-                                //             if link.rel()
-                                //                 == Some(b"http://www.w3.org/ns/json-ld#context")
-                                //             {
-                                //                 if context_url.is_some() {
-                                //                     return Err(Error::MultipleContextLinkHeaders);
-                                //                 }
-                                //
-                                //                 let u = link
-                                //                     .href()
-                                //                     .resolved(vocabulary.iri(&url).unwrap());
-                                //                 context_url = Some(vocabulary.insert(u.as_iri()));
-                                //             }
-                                //         }
-                                //     }
-                                // }
-
                                 let profile = HashSet::new();
-                                // for p in content_type
-                                //     .profile()
-                                //     .into_iter()
-                                //     .flat_map(|p| p.split(|b| *b == b' '))
-                                // {
-                                //     if let Ok(iri) = Iri::new(p) {
-                                //         profile.insert(Profile::new(iri, vocabulary));
-                                //     }
-                                // }
 
                                 let bytes = Bytes::from(resp.body.into_bytes());
+
+                                self.cache.insert(url, bytes.clone());
                                 let document = (*self.parser)(vocabulary, &url, bytes)
                                     .map_err(Error::Parse)?;
 
-                                break Ok(RemoteDocument::new_full(
+                                let document = RemoteDocument::new_full(
                                     Some(url),
                                     Some(Mime::from_str("application/json+ld").unwrap()),
-                                    context_url,
+                                    None,
                                     profile,
                                     document,
-                                ));
+                                );
+
+                                break Ok(document);
                             }
                             None => {
                                 // for link in resp.headers.get(LINK).into_iter() {
