@@ -33,7 +33,7 @@ pub enum JsonToken {
     /// "String"
     String(String),
     /// 42
-    Num(u32, u32),
+    Num(u32, Option<u32>),
 }
 
 impl Token for JsonToken {
@@ -62,8 +62,9 @@ impl Display for JsonToken {
             JsonToken::True => write!(f, "true"),
             JsonToken::False => write!(f, "false"),
             JsonToken::Null => write!(f, "null"),
-            JsonToken::String(..) => write!(f, "a string"),
-            JsonToken::Num(..) => write!(f, "a number"),
+            JsonToken::String(x) => write!(f, "\"{}\"", x),
+            JsonToken::Num(a, Some(b)) => write!(f, "{}.{}", a, b),
+            JsonToken::Num(a, None) => write!(f, "{}", a),
         }
     }
 }
@@ -97,7 +98,7 @@ fn parser() -> impl Parser<char, Vec<Spanned<JsonToken>>, Error = Simple<char>> 
     items.map_with_span(spanned).padded().repeated()
 }
 
-fn parse_num() -> impl Parser<char, (u32, u32), Error = Simple<char>> {
+fn parse_num() -> impl Parser<char, (u32, Option<u32>), Error = Simple<char>> {
     let frac = just('.').chain(text::digits(10));
 
     // let exp = just('e')
@@ -112,12 +113,12 @@ fn parse_num() -> impl Parser<char, (u32, u32), Error = Simple<char>> {
         .map(|(a, b)| {
             let a = u32::from_str(&a.into_iter().collect::<String>())?;
             let b = if let Some(b) = b {
-                u32::from_str(&b.into_iter().collect::<String>())?
+                Some(u32::from_str(&b.into_iter().collect::<String>())?)
             } else {
-                0
+                None
             };
 
-            Ok::<(u32, u32), ParseIntError>((a, b))
+            Ok::<(u32, Option<u32>), ParseIntError>((a, b))
         })
         .unwrapped()
         .labelled("number");

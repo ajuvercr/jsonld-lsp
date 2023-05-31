@@ -1,9 +1,12 @@
-use std::ops::Range;
+use std::{collections::HashMap, ops::Range, str::FromStr, sync::Arc};
 
+use bytes::Bytes;
 use chumsky::prelude::Simple;
-use lsp_types::SemanticTokenType;
+use iref::IriBuf;
+use lsp_types::{SemanticToken, SemanticTokenType};
+use tokio::sync::Mutex;
 
-use crate::{model::Spanned, parent::ParentingSystem};
+use crate::{model::Spanned, parent::ParentingSystem, utils::ReqwestLoader};
 
 use self::{
     parent::JsonNode,
@@ -11,13 +14,19 @@ use self::{
     tokenizer::{tokenize, JsonToken},
 };
 
-use super::{Lang, Node, LangState};
+use super::{Lang, LangState, Node};
 
 pub mod parent;
 pub mod parser;
 pub mod tokenizer;
 
-pub struct JsonLd;
+type Parents = ParentingSystem<Spanned<<JsonLd as Lang>::Node>>;
+
+pub struct JsonLd {
+    id: String,
+    loader: Arc<Mutex<ReqwestLoader<IriBuf>>>,
+    parents: Parents,
+}
 
 impl Node<JsonToken> for JsonNode {
     fn leaf<'a>(&'a self) -> Option<&'a JsonToken> {
@@ -80,5 +89,19 @@ impl Lang for JsonLd {
     }
 }
 
+#[async_trait::async_trait]
+impl LangState for JsonLd {
+    async fn update(&mut self, parents: ParentingSystem<Spanned<<JsonLd as Lang>::Node>>) {
+        self.parents = parents;
+        if let Ok(bytes) = parents.to_json_vec() {
+            self.loader
+                .lock()
+                .await
+                .set_document(IriBuf::from_str(&self.id).unwrap(), bytes);
+        }
+    }
 
-
+    async fn do_semantic_tokens(&mut self) -> Vec<SemanticToken> {
+        Vec::new()
+    }
+}

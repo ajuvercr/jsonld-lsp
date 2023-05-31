@@ -1,7 +1,6 @@
 use std::{hash::Hash, ops::Range};
 
-use dashmap::DashMap;
-use lsp_types::SemanticTokenType;
+use lsp_types::{SemanticToken, SemanticTokenType};
 
 use crate::{model::Spanned, parent::ParentingSystem};
 
@@ -39,15 +38,31 @@ pub trait Lang {
     );
 }
 
-pub trait LangState<L: Lang>
+#[async_trait::async_trait]
+pub trait LangState: Lang
 where
     Self: Sized,
 {
-    fn lang(&self) -> &L;
-    fn update(
+    async fn update(&mut self, parents: ParentingSystem<Spanned<Self::Node>>);
+
+    async fn do_semantic_tokens(&mut self) -> Vec<SemanticToken>;
+
+    async fn update_text(
         &mut self,
-        id: String,
-        parents: ParentingSystem<L::Node>,
-        others: DashMap<String, Self>,
-    );
+        source: &str,
+    ) -> Vec<Result<Self::TokenError, Self::ElementError>> {
+        let (tokens, errors) = self.tokenize(source);
+
+        if !errors.is_empty() {
+            return errors.into_iter().map(Result::Ok).collect();
+        }
+
+        let (elements, errors) = self.parse(source, &tokens);
+
+        let parenting = self.parents(&elements);
+
+        self.update(parenting);
+
+        errors.into_iter().map(Result::Err).collect()
+    }
 }

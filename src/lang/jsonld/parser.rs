@@ -84,7 +84,7 @@ fn parser() -> impl Parser<JsonToken, Spanned<Json>, Error = Simple<JsonToken>> 
 #[cfg(test)]
 mod tests {
 
-    use crate::lang::jsonld::tokenizer::tokenize;
+    use crate::lang::jsonld::{tokenizer::tokenize, parent};
 
     use super::*;
 
@@ -123,8 +123,26 @@ mod tests {
             arr,
             vec![
                 Json::Token(JsonToken::String("test".into())),
-                Json::Token(JsonToken::Num(42, 0))
+                Json::Token(JsonToken::Num(42, None))
             ]
+        );
+    }
+    #[test]
+    fn parse_json_array_to_vec() {
+        let source = "[\"test\", 42]";
+        let (tokens, token_errors) = tokenize(source);
+        let (json, json_errors) = parse(source, tokens);
+
+        assert!(token_errors.is_empty());
+        assert!(json_errors.is_empty());
+
+        let parents = parent::system(json);
+
+        let vec = parents.to_json_vec().unwrap();
+
+        assert_eq!(
+            vec,
+            b"[\"test\":42]"
         );
     }
 
@@ -146,7 +164,7 @@ mod tests {
             arr,
             vec![
                 Json::Token(JsonToken::String("test".into())),
-                Json::Token(JsonToken::Num(42, 0)),
+                Json::Token(JsonToken::Num(42, None)),
             ]
         );
     }
