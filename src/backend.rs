@@ -3,12 +3,12 @@ use crate::lsp_types::*;
 use crate::model::{JsonToken, ParentingSystem};
 use crate::parser::parse;
 use crate::semantics::{semantic_tokens, LEGEND_TYPE};
-use crate::utils::{offset_to_position, offsets_to_range, position_to_offset, Resp};
+use crate::utils::{offset_to_position, offsets_to_range, position_to_offset};
 use crate::Documents;
 use dashmap::DashMap;
 use json_ld::Print;
 use log::debug;
-use reqwest::header::HeaderValue;
+
 use ropey::Rope;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
@@ -68,14 +68,6 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
                     all_commit_characters: None,
                     completion_item: None,
                 }),
-                workspace: Some(WorkspaceServerCapabilities {
-                    workspace_folders: Some(WorkspaceFoldersServerCapabilities {
-                        supported: Some(true),
-                        change_notifications: Some(OneOf::Left(true)),
-                    }),
-                    file_operations: None,
-                }),
-                // semantic_tokens_provider: None,
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensRegistrationOptions(
                         SemanticTokensRegistrationOptions {
@@ -101,9 +93,6 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
                         },
                     ),
                 ),
-                // definition: Some(GotoCapability::default()),
-                definition_provider: Some(OneOf::Left(true)),
-                references_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Right(RenameOptions {
                     prepare_provider: Some(true),
                     work_done_progress_options: Default::default(),

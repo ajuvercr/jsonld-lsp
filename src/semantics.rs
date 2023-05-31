@@ -1,7 +1,12 @@
-use crate::lsp_types::{SemanticToken, SemanticTokenType};
-use ropey::Rope;
+use std::collections::HashMap;
 
-use crate::model::{JsonToken, ParentingSystem};
+use crate::{
+    lang::{Lang, Node, Token},
+    lsp_types::{SemanticToken, SemanticTokenType},
+    model::{spanned, Spanned},
+    parent::ParentingSystem,
+};
+use ropey::Rope;
 
 pub const LEGEND_TYPE: &[SemanticTokenType] = &[
     SemanticTokenType::VARIABLE,
@@ -9,38 +14,36 @@ pub const LEGEND_TYPE: &[SemanticTokenType] = &[
     SemanticTokenType::NUMBER,
     SemanticTokenType::KEYWORD,
     SemanticTokenType::PROPERTY,
+    SemanticTokenType::ENUM_MEMBER,
 ];
 
-struct Token {
-    ty: usize,
+struct T {
     start: usize,
     length: usize,
+    ty: usize,
 }
 
-pub fn semantic_tokens(system: &ParentingSystem, rope: &Rope) -> Vec<SemanticToken> {
-    let mut tokens: Vec<_> = system
+pub fn semantic_tokens<L: Lang>(
+    lang: &L,
+    system: &ParentingSystem<Spanned<L::Node>>,
+    rope: &Rope,
+) -> Vec<SemanticToken> {
+    let mut tokens: HashMap<_, _> = system
         .iter()
-        .flat_map(|(_, x)| {
-            let mut span = x.span();
-            let ty = match x.value() {
-                JsonToken::KV(key, _) => {
-                    span = key.span();
-                    match key.as_str() {
-                        "@id" | "@type" | "@context" => SemanticTokenType::KEYWORD,
-                        _ => SemanticTokenType::PROPERTY,
-                    }
-                }
-                JsonToken::Str(_) => SemanticTokenType::STRING,
-                JsonToken::Bool(_) => SemanticTokenType::NUMBER,
-                JsonToken::Num(_) => SemanticTokenType::NUMBER,
-                _ => return None,
-            };
-            Some((span, ty))
-        })
-        .map(|(span, ty)| Token {
-            ty: LEGEND_TYPE.iter().position(|x| x == &ty).unwrap(),
-            start: span.start,
-            length: span.len(),
+        .flat_map(|(_, x)| x.leaf().map(|t| spanned(t, x.span().clone())))
+        .flat_map(|s| s.value().token().map(|t| (s.span().clone(), t)))
+        .collect();
+
+    lang.semantic_tokens(system, |token, ty| {
+        tokens.insert(token, ty);
+    });
+
+    let tokens: Vec<_> = tokens
+        .into_iter()
+        .map(|(k, v)| T {
+            start: k.start,
+            length: k.end - k.start,
+            ty: LEGEND_TYPE.iter().position(|x| x == &v).unwrap_or(0),
         })
         .collect();
 
