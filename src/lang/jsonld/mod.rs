@@ -1,12 +1,17 @@
-use std::{collections::HashMap, ops::Range, str::FromStr, sync::Arc};
+use core::fmt;
+use std::{ops::Range, str::FromStr, sync::Arc};
 
-use bytes::Bytes;
 use chumsky::prelude::Simple;
 use iref::IriBuf;
-use lsp_types::{SemanticToken, SemanticTokenType};
+use json_ld::ContextLoader;
+use lsp_types::{CompletionItemKind, SemanticToken, SemanticTokenType};
+use ropey::Rope;
 use tokio::sync::Mutex;
 
-use crate::{model::Spanned, parent::ParentingSystem, utils::ReqwestLoader};
+use crate::{
+    contexts::filter_definition, model::Spanned, parent::ParentingSystem,
+    semantics::semantic_tokens, utils::ReqwestLoader,
+};
 
 use self::{
     parent::JsonNode,
@@ -14,18 +19,41 @@ use self::{
     tokenizer::{tokenize, JsonToken},
 };
 
-use super::{Lang, LangState, Node};
+use super::{Lang, LangState, Node, SimpleCompletion};
 
 pub mod parent;
 pub mod parser;
 pub mod tokenizer;
 
 type Parents = ParentingSystem<Spanned<<JsonLd as Lang>::Node>>;
+pub type Loader = Arc<Mutex<ReqwestLoader<IriBuf>>>;
 
 pub struct JsonLd {
     id: String,
-    loader: Arc<Mutex<ReqwestLoader<IriBuf>>>,
+    loader: Loader,
     parents: Parents,
+    rope: Rope,
+}
+impl fmt::Debug for JsonLd {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let bytes = self.parents.to_json_vec().unwrap();
+        let json = unsafe { std::str::from_utf8_unchecked(&bytes) };
+
+        write!(f, "JsonLd {{ id: {}, json: {} }}", self.id, json)
+    }
+}
+
+impl JsonLd {
+    pub fn new(id: String, loader: Arc<Mutex<ReqwestLoader<IriBuf>>>) -> Self {
+        let parents = parent::system(Spanned(Json::Token(JsonToken::Null), 0..0));
+
+        Self {
+            id,
+            loader,
+            parents,
+            rope: Rope::from(""),
+        }
+    }
 }
 
 impl Node<JsonToken> for JsonNode {
@@ -48,7 +76,8 @@ impl Lang for JsonLd {
 
     type Node = JsonNode;
 
-    fn tokenize(&self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>) {
+    fn tokenize(&mut self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>) {
+        self.rope = Rope::from(source.to_owned());
         tokenize(source)
     }
 
@@ -93,7 +122,7 @@ impl Lang for JsonLd {
 impl LangState for JsonLd {
     async fn update(&mut self, parents: ParentingSystem<Spanned<<JsonLd as Lang>::Node>>) {
         self.parents = parents;
-        if let Ok(bytes) = parents.to_json_vec() {
+        if let Ok(bytes) = self.parents.to_json_vec() {
             self.loader
                 .lock()
                 .await
@@ -102,6 +131,65 @@ impl LangState for JsonLd {
     }
 
     async fn do_semantic_tokens(&mut self) -> Vec<SemanticToken> {
-        Vec::new()
+        semantic_tokens(self, &self.parents, &self.rope)
+    }
+
+    async fn do_completion(&mut self, trigger: Option<String>) -> Vec<super::SimpleCompletion> {
+        if trigger == Some("@".to_string()) {
+            self.get_ids()
+                .into_iter()
+                .map(|x| {
+                    let w = Some(format!("@{x}"));
+
+                    SimpleCompletion {
+                        documentation: Some(format!("Subject: {x}")),
+                        edit: format!("{{\"@id\": \"{x}\" }}"),
+                        kind: CompletionItemKind::VARIABLE,
+                        label: x,
+                        sort_text: w.clone(),
+                        filter_text: w,
+                    }
+                })
+                .collect()
+        } else {
+            let iri = iref::IriBuf::from_str(&self.id).unwrap();
+            let doc = self.loader.lock().await.load_context(iri).await.unwrap();
+
+            doc.into_document()
+                .into_value()
+                .traverse()
+                .filter_map(filter_definition)
+                .map(|v| SimpleCompletion {
+                    kind: CompletionItemKind::PROPERTY,
+                    label: v.key.to_string(),
+                    documentation: Some(format!("\"{}\"", v.value)),
+                    sort_text: None,
+                    filter_text: None,
+                    edit: format!("\"{}\"", v.value),
+                })
+                .collect()
+        }
+    }
+}
+
+impl JsonLd {
+    fn get_ids(&self) -> Vec<String> {
+        let id_indices = self
+            .parents
+            .iter()
+            .map(|(_, x)| x)
+            .filter(|x| x.is_kv())
+            .map(|x| x.to_kv())
+            .filter(|(id, _)| id.value() == "@id")
+            .map(|(_, idx)| idx);
+
+        let ids = id_indices
+            .map(|x| &self.parents[x].0)
+            .filter(|x| x.is_leaf())
+            .map(|x| x.to_leaf())
+            .filter(|x| x.is_string())
+            .map(|x| x.into_string());
+
+        ids.collect()
     }
 }

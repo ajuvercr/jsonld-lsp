@@ -38,7 +38,7 @@ pub fn semantic_tokens<L: Lang>(
         tokens.insert(token, ty);
     });
 
-    let tokens: Vec<_> = tokens
+    let mut tokens: Vec<_> = tokens
         .into_iter()
         .map(|(k, v)| T {
             start: k.start,

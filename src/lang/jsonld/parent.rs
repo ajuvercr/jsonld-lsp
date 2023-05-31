@@ -15,7 +15,7 @@ pub enum JsonNode {
 }
 
 impl ParentingSystem<Spanned<JsonNode>> {
-    fn write(&self, node: &Spanned<JsonNode>, write: impl Write) -> io::Result<()> {
+    fn write(&self, node: &Spanned<JsonNode>, write: &mut impl Write) -> io::Result<()> {
         match node.value() {
             JsonNode::Leaf(node) => {
                 write!(write, "{}", node)?;
@@ -54,7 +54,7 @@ impl ParentingSystem<Spanned<JsonNode>> {
     pub fn to_json_vec(&self) -> io::Result<Vec<u8>> {
         let mut cursor = Cursor::new(Vec::new());
 
-        self.write(&self[0], &mut cursor);
+        self.write(&self[0], &mut cursor)?;
 
         Ok(cursor.into_inner())
     }

@@ -1,18 +1,15 @@
-use crate::contexts::CtxResolver;
+use crate::lang::jsonld::{JsonLd, Loader};
+use crate::lang::{LangState, SimpleCompletion};
 use crate::lsp_types::*;
-use crate::model::{JsonToken, ParentingSystem};
-use crate::parser::parse;
-use crate::semantics::{semantic_tokens, LEGEND_TYPE};
-use crate::utils::{offset_to_position, offsets_to_range, position_to_offset};
-use crate::Documents;
+
+use crate::semantics::LEGEND_TYPE;
+use crate::utils::offset_to_position;
 use dashmap::DashMap;
-use json_ld::Print;
-use log::debug;
 
 use ropey::Rope;
-use std::collections::{HashMap, HashSet};
+
 use std::fmt::Display;
-use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
+use tower_lsp::jsonrpc::Result;
 use tower_lsp::LanguageServer;
 
 #[tower_lsp::async_trait]
@@ -45,11 +42,9 @@ impl Client for tower_lsp::Client {
 #[derive(Debug)]
 pub struct Backend<C: Client> {
     pub client: C,
-    contexts: CtxResolver,
-    ids: DashMap<String, HashSet<String>>,
-    document: Documents,
 
-    tokens: DashMap<String, Vec<SemanticToken>>,
+    loader: Loader,
+    langs: DashMap<String, JsonLd>,
 }
 
 #[tower_lsp::async_trait]
@@ -102,106 +97,106 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
         })
     }
 
-    async fn prepare_rename(
-        &self,
-        params: TextDocumentPositionParams,
-    ) -> Result<Option<PrepareRenameResponse>> {
-        let loc = params.position;
-        let uri = params.text_document.uri;
-        if let Some(x) = self.document.get(uri.as_str()) {
-            let (parents, rope) = (&x.0, &x.1);
-            let pos =
-                position_to_offset(loc, &rope).ok_or(Error::new(ErrorCode::InvalidRequest))?;
-            if let Some((_, item)) = parents // find me the most matching token
-                .iter()
-                .filter(|(_, x)| x.span().contains(&pos))
-                .min_by_key(|(_, x)| x.span().len())
-            {
-                let st = match item.value() {
-                    JsonToken::KV(s, _) => s.as_str(),
-                    JsonToken::Str(s) => s.as_str(),
-                    _ => return Ok(None),
-                };
-                let span = item.span();
-                if let Some(range) = offsets_to_range(span.start + 1, span.end - 1, &rope) {
-                    return Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
-                        range,
-                        placeholder: String::from(st),
-                    }));
-                }
-            }
-        }
-        Ok(None)
-    }
-
-    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
-        let new_id = params.new_name;
-
-        let loc = params.text_document_position.position;
-        let uri = params.text_document_position.text_document.uri;
-
-        if let Some(x) = self.document.get(uri.as_str()) {
-            let (parents, rope) = (&x.0, &x.1);
-
-            let pos =
-                position_to_offset(loc, &rope).ok_or(Error::new(ErrorCode::InvalidRequest))?;
-
-            if let Some((idx, item)) = parents // find me the most matching token
-                .iter()
-                .filter(|(_, x)| x.span().contains(&pos))
-                .min_by_key(|(_, x)| x.span().len())
-            {
-                // is it's parent a key value? and am I a string?
-                if let (Some(kv), Some(old_id)) = (
-                    parents.parent(idx).and_then(|(_i, x)| x.as_kv()),
-                    item.as_str(),
-                ) {
-                    // Check if we can actually rename this, qq
-                    if kv.0.as_str() == "@id" {
-                        let changes: Vec<_> = parents
-                            .iter()
-                            .map(|(_, x)| x) // I only care about values
-                            .filter_map(|x| x.as_kv()) // give me key value pairs
-                            .filter(|x| x.0.as_str() == "@id") // that are @id as key
-                            .map(|x| &parents[x.1]) // now give me the value
-                            .filter_map(|x| x.map_ref(|x| x.as_str()).transpose()) // that is a string
-                            .filter(|x| x.value() == &old_id) // and matches the old value
-                            // This should change to the new value
-                            // (take care of quotes)
-                            .filter_map(|x| {
-                                offsets_to_range(x.span().start + 1, x.span().end - 1, rope)
-                            })
-                            .map(|x| TextEdit::new(x, new_id.clone()))
-                            .collect();
-
-                        let mut map = HashMap::new();
-                        map.insert(uri, changes);
-
-                        return Ok(Some(WorkspaceEdit {
-                            changes: Some(map),
-                            document_changes: None,
-                            change_annotations: None,
-                        }));
-                    }
-                }
-
-                debug!("Found (pos {} ) {:?}", pos, item);
-            }
-        }
-
-        Ok(None)
-    }
+    // async fn prepare_rename(
+    //     &self,
+    //     params: TextDocumentPositionParams,
+    // ) -> Result<Option<PrepareRenameResponse>> {
+    //     let loc = params.position;
+    //     let uri = params.text_document.uri;
+    //     if let Some(x) = self.document.get(uri.as_str()) {
+    //         let (parents, rope) = (&x.0, &x.1);
+    //         let pos =
+    //             position_to_offset(loc, &rope).ok_or(Error::new(ErrorCode::InvalidRequest))?;
+    //         if let Some((_, item)) = parents // find me the most matching token
+    //             .iter()
+    //             .filter(|(_, x)| x.span().contains(&pos))
+    //             .min_by_key(|(_, x)| x.span().len())
+    //         {
+    //             let st = match item.value() {
+    //                 JsonToken::KV(s, _) => s.as_str(),
+    //                 JsonToken::Str(s) => s.as_str(),
+    //                 _ => return Ok(None),
+    //             };
+    //             let span = item.span();
+    //             if let Some(range) = offsets_to_range(span.start + 1, span.end - 1, &rope) {
+    //                 return Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
+    //                     range,
+    //                     placeholder: String::from(st),
+    //                 }));
+    //             }
+    //         }
+    //     }
+    //     Ok(None)
+    // }
+    //
+    // async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+    //     let new_id = params.new_name;
+    //
+    //     let loc = params.text_document_position.position;
+    //     let uri = params.text_document_position.text_document.uri;
+    //
+    //     if let Some(x) = self.document.get(uri.as_str()) {
+    //         let (parents, rope) = (&x.0, &x.1);
+    //
+    //         let pos =
+    //             position_to_offset(loc, &rope).ok_or(Error::new(ErrorCode::InvalidRequest))?;
+    //
+    //         if let Some((idx, item)) = parents // find me the most matching token
+    //             .iter()
+    //             .filter(|(_, x)| x.span().contains(&pos))
+    //             .min_by_key(|(_, x)| x.span().len())
+    //         {
+    //             // is it's parent a key value? and am I a string?
+    //             if let (Some(kv), Some(old_id)) = (
+    //                 parents.parent(idx).and_then(|(_i, x)| x.as_kv()),
+    //                 item.as_str(),
+    //             ) {
+    //                 // Check if we can actually rename this, qq
+    //                 if kv.0.as_str() == "@id" {
+    //                     let changes: Vec<_> = parents
+    //                         .iter()
+    //                         .map(|(_, x)| x) // I only care about values
+    //                         .filter_map(|x| x.as_kv()) // give me key value pairs
+    //                         .filter(|x| x.0.as_str() == "@id") // that are @id as key
+    //                         .map(|x| &parents[x.1]) // now give me the value
+    //                         .filter_map(|x| x.map_ref(|x| x.as_str()).transpose()) // that is a string
+    //                         .filter(|x| x.value() == &old_id) // and matches the old value
+    //                         // This should change to the new value
+    //                         // (take care of quotes)
+    //                         .filter_map(|x| {
+    //                             offsets_to_range(x.span().start + 1, x.span().end - 1, rope)
+    //                         })
+    //                         .map(|x| TextEdit::new(x, new_id.clone()))
+    //                         .collect();
+    //
+    //                     let mut map = HashMap::new();
+    //                     map.insert(uri, changes);
+    //
+    //                     return Ok(Some(WorkspaceEdit {
+    //                         changes: Some(map),
+    //                         document_changes: None,
+    //                         change_annotations: None,
+    //                     }));
+    //                 }
+    //             }
+    //
+    //             debug!("Found (pos {} ) {:?}", pos, item);
+    //         }
+    //     }
+    //
+    //     Ok(None)
+    // }
 
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
-        debug!("semantic tokens full");
         let uri = params.text_document.uri.as_str();
-        if let Some(tokens) = self.tokens.get(uri) {
+        if let Some(mut lang) = self.langs.get_mut(uri) {
+            let tokens = lang.do_semantic_tokens().await;
             return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
                 result_id: None,
-                data: tokens.value().clone(),
+                data: tokens,
             })));
         }
         Ok(None)
@@ -211,159 +206,78 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
         Ok(())
     }
 
-    async fn did_change_workspace_folders(&self, _: DidChangeWorkspaceFoldersParams) {
-        self.client
-            .log_message(MessageType::INFO, "workspace folders changed!")
-            .await;
-    }
-
-    async fn did_change_configuration(&self, _: DidChangeConfigurationParams) {
-        self.client
-            .log_message(MessageType::INFO, "configuration changed!")
-            .await;
-    }
-
-    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
-        let s = params
-            .changes
-            .iter()
-            .map(|x| x.uri.as_str())
-            .collect::<Vec<&str>>()
-            .join(", ");
-
-        self.client
-            .log_message(
-                MessageType::INFO,
-                format!("watched files have changed! {}", s),
-            )
-            .await;
-    }
-
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.client
-            .log_message(
-                MessageType::INFO,
-                format!("file opened! {}", params.text_document.uri.as_str()),
-            )
-            .await;
-
         self.on_change(TextDocumentItem {
-            uri: params.text_document.uri.clone(),
+            uri: params.text_document.uri,
             text: params.text_document.text,
             version: params.text_document.version,
         })
         .await;
-
-        self.contexts
-            .resolve(&params.text_document.uri, &self.document, &self.client)
-            .await;
     }
 
-    async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let ev: Vec<_> = params
-            .content_changes
-            .iter()
-            .map(|x| x.text.len())
-            .collect();
-
-        self.client
-            .log_message(
-                MessageType::INFO,
-                format!("did change! {} {:?}", params.text_document.uri.as_str(), ev),
-            )
-            .await;
-
+    async fn did_change(
+        &self,
+        DidChangeTextDocumentParams {
+            text_document,
+            content_changes,
+        }: DidChangeTextDocumentParams,
+    ) {
+        let text: String = content_changes[0].text.clone();
         self.on_change(TextDocumentItem {
-            uri: params.text_document.uri,
-            text: params.content_changes[0].text.clone(),
-            version: params.text_document.version,
+            uri: text_document.uri,
+            version: text_document.version,
+            text,
         })
         .await;
     }
 
-    async fn did_save(&self, _: DidSaveTextDocumentParams) {
-        self.client
-            .log_message(MessageType::INFO, "file saved!")
-            .await;
-    }
-
-    async fn did_close(&self, _: DidCloseTextDocumentParams) {
-        self.client
-            .log_message(MessageType::INFO, "file closed!")
-            .await;
-    }
-
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let id = params.text_document_position.text_document.uri.to_string();
+
+        if self.langs.contains_key(&id) {
+            let lang = JsonLd::new(id.clone(), self.loader.clone());
+            self.langs.insert(id.clone(), lang);
+        }
+
+        let mut lang = self.langs.get_mut(&id).unwrap();
+
         let ctx = params
             .context
             .as_ref()
             .and_then(|x| x.trigger_character.clone());
 
-        self.client
-            .log_message(MessageType::INFO, format!("trigger char {:?}", ctx))
-            .await;
+        let simples = lang.do_completion(ctx).await;
 
-        let uri = params.text_document_position.text_document.uri;
+        let end = params.text_document_position.position;
+        let start = Position::new(end.line, end.character - 1);
+        let range = Range::new(start, end);
 
-        if let (Some("@"), Some(ids)) =
-            (ctx.as_ref().map(|x| x.as_str()), self.ids.get(uri.as_str()))
-        {
-            let end = params.text_document_position.position;
-            let start = Position::new(end.line, end.character - 1);
-            let range = Range::new(start, end);
-            let out: Vec<_> = ids
-                .iter()
-                .map(|s| {
-                    let w = format!("@{}", s);
+        let completions = simples
+            .into_iter()
+            .map(
+                |SimpleCompletion {
+                     filter_text,
+                     sort_text,
+                     label,
+                     documentation,
+                     kind,
+                     edit,
+                 }| {
                     CompletionItem {
-                        label: s.clone(),
-                        kind: Some(CompletionItemKind::VARIABLE),
-                        sort_text: Some(w.clone()),
-                        filter_text: Some(w.clone()),
-                        documentation: Some(Documentation::String(format!("Subject: '{}'", s))),
-                        // insert_text: Some(format!("{{\"@id\": \"{}\"}}", s)),
+                        label,
+                        kind: Some(kind),
+                        sort_text,
+                        filter_text,
+                        documentation: documentation.map(|st| Documentation::String(st)),
                         text_edit: Some(CompletionTextEdit::Edit(TextEdit {
                             range,
-                            new_text: format!("{{\"@id\": \"{}\"}}", s),
+                            new_text: edit,
                         })),
                         ..Default::default()
                     }
-                })
-                .collect();
-
-            let filters: Vec<_> = out.iter().flat_map(|x| &x.filter_text).collect();
-            debug!("filter {:?} ids {:?}", filters, ids);
-            return Ok(Some(CompletionResponse::Array(out)));
-        }
-
-        let mut completions = Vec::new();
-
-        self.client
-            .log_message(MessageType::INFO, format!("Resolving context {}", uri))
-            .await;
-
-        let local_files: Vec<_> = self.document.iter().map(|x| x.key().to_string()).collect();
-        self.client
-            .log_message(MessageType::INFO, format!("local files {:?}", local_files))
-            .await;
-
-        let ctx = self
-            .contexts
-            .resolve(&uri, &self.document, &self.client)
-            .await;
-
-        self.client
-            .log_message(MessageType::INFO, format!("Ctx resolved {}", uri))
-            .await;
-
-        let extra = ctx.values().map(|v| CompletionItem {
-            label: v.key.to_string(),
-            kind: Some(CompletionItemKind::PROPERTY),
-            documentation: Some(Documentation::String(format!("\"{}\"", v.value))),
-            insert_text: Some(v.key.to_string()),
-            ..Default::default()
-        });
-        completions.extend(extra);
+                },
+            )
+            .collect();
 
         Ok(Some(CompletionResponse::Array(completions)))
     }
@@ -379,58 +293,28 @@ impl<C: Client> Backend<C> {
     pub fn new(client: C) -> Self {
         Backend {
             client,
-            contexts: CtxResolver::default(),
-            tokens: DashMap::new(),
-            ids: DashMap::new(),
-            document: DashMap::new(),
+            langs: DashMap::new(),
+            loader: Default::default(),
         }
-    }
-    fn find_ids(&self, obj: &ParentingSystem) -> HashSet<String> {
-        obj.iter()
-            .map(|(_, x)| x)
-            .filter_map(|x| x.as_kv())
-            .filter(|x| x.0.as_str() == "@id")
-            .map(|x| &obj[x.1])
-            .filter_map(|x| x.as_str())
-            .map(String::from)
-            .collect()
     }
 
     async fn on_change(&self, params: TextDocumentItem) -> Option<()> {
-        log::debug!("start on change");
+        let id = params.uri.to_string();
 
-        let (json, errors) = parse(&params.text);
-        let parenting = ParentingSystem::from_json(json);
-
-        if let Some(json) = parenting.jsonld_value(0) {
-            log::debug!("Found json {}", json.pretty_print());
-        } else {
-            log::debug!("Found no valid json");
+        if self.langs.contains_key(&id) {
+            let lang = JsonLd::new(id.clone(), self.loader.clone());
+            self.langs.insert(id.clone(), lang);
         }
 
-        let uri_str = params.uri.as_str();
+        let mut lang = self.langs.get_mut(&id).unwrap();
 
-        if !self.ids.contains_key(uri_str) {
-            self.ids.insert(uri_str.to_string(), HashSet::default());
-        }
-
-        let ids = self.find_ids(&parenting);
-
+        let errors = lang.update_text(&params.text).await;
         let rope = Rope::from_str(&params.text);
-        if !errors.is_empty() {
-            if let Some(mut p) = self.ids.get_mut(uri_str) {
-                p.value_mut().extend(ids);
-            }
-        } else {
-            self.ids.insert(params.uri.to_string(), ids);
-            let tokens = semantic_tokens(&parenting, &rope);
-            self.tokens.insert(uri_str.to_string(), tokens);
-        }
 
         let diagnostics = errors
             .into_iter()
             .filter_map(|item| {
-                let (span, message) = (item.span, item.msg);
+                let (span, message) = (item.range, item.msg);
                 let start_position = offset_to_position(span.start, &rope)?;
                 let end_position = offset_to_position(span.end, &rope)?;
                 Some(Diagnostic::new_simple(
@@ -440,12 +324,10 @@ impl<C: Client> Backend<C> {
             })
             .collect::<Vec<_>>();
 
-        self.document.insert(uri_str.to_string(), (parenting, rope));
         self.client
-            .publish_diagnostics(params.uri.clone(), diagnostics, Some(params.version))
+            .publish_diagnostics(params.uri, diagnostics, Some(params.version))
             .await;
 
-        log::debug!("finished on change");
         Some(())
     }
 }

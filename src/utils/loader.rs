@@ -84,6 +84,13 @@ pub struct ReqwestLoader<
     cache: HashMap<I, Bytes>,
 }
 
+impl<I: AsRef<str>, M, T, E> std::fmt::Debug for ReqwestLoader<I, M, T, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let cached: Vec<_> = self.cache.keys().map(|x| x.as_ref()).collect();
+        write!(f, "ReqwestLoader {{ cached: {:?} }}", cached)
+    }
+}
+
 impl<I, M, T, E> ReqwestLoader<I, M, T, E> {
     /// Creates a new loader with the given parsing function.
     pub fn new(
@@ -200,10 +207,6 @@ impl<M> fmt::Display for ParseError<M> {
     }
 }
 
-fn is_json_ld(this: &str) -> bool {
-    this == "application/json" || this == "application/ld+json"
-}
-
 impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, E> Loader<I, M>
     for ReqwestLoader<I, M, T, E>
 {
@@ -220,7 +223,8 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
     {
         async move {
             if let Some(bytes) = self.cache.get(&url) {
-                let document = (*self.parser)(vocabulary, &url, bytes.clone()).map_err(Error::Parse)?;
+                let document =
+                    (*self.parser)(vocabulary, &url, bytes.clone()).map_err(Error::Parse)?;
 
                 let document = RemoteDocument::new_full(
                     Some(url),
@@ -263,9 +267,10 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
 
                                 let bytes = Bytes::from(resp.body.into_bytes());
 
-                                self.cache.insert(url, bytes.clone());
-                                let document = (*self.parser)(vocabulary, &url, bytes)
+                                let document = (*self.parser)(vocabulary, &url, bytes.clone())
                                     .map_err(Error::Parse)?;
+
+                                self.cache.insert(url.clone(), bytes);
 
                                 let document = RemoteDocument::new_full(
                                     Some(url),
