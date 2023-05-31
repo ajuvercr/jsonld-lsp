@@ -2,17 +2,17 @@
 use bytes::Bytes;
 use futures::future::{BoxFuture, FutureExt};
 use hashbrown::HashSet;
-use iref::{Iri, IriRef};
+use iref::{Iri};
 use json_ld::{Loader, Profile, RemoteDocument};
 use locspan::{Meta, Span};
 use mime::Mime;
 use once_cell::sync::OnceCell;
 use rdf_types::{vocabulary::Index, IriVocabulary, IriVocabularyMut};
 use reqwest::{
-    header::{HeaderName, ACCEPT, CONTENT_TYPE, LINK, LOCATION},
+    header::{CONTENT_TYPE},
     StatusCode,
 };
-use std::{collections::HashMap, fmt, hash::Hash, ops::Deref, str::FromStr, string::FromUtf8Error};
+use std::{collections::HashMap, fmt, hash::Hash, str::FromStr, string::FromUtf8Error};
 
 use super::fetch::fetch;
 
@@ -192,9 +192,6 @@ impl<M> fmt::Display for ParseError<M> {
             Self::Json(e) => e.fmt(f),
         }
     }
-}
-fn is_json_ld(this: &str) -> bool {
-    this == "application/json" || this == "application/ld+json"
 }
 
 impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, E> Loader<I, M>

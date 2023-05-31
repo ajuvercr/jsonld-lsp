@@ -3,6 +3,7 @@ use std::{
     ops::{Deref, Index, IndexMut, Range},
 };
 
+use enum_methods::{EnumIntoGetters, EnumIsA, EnumToGetters};
 use json_ld::syntax;
 use locspan::{Meta, Span};
 
@@ -75,7 +76,7 @@ impl<T> Spanned<T> {
 
 pub type ObjMember = Option<(Spanned<String>, Spanned<Json>)>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Obj(pub Vec<Spanned<ObjMember>>);
 
 impl Deref for Obj {
@@ -121,7 +122,7 @@ impl<'a> ObjRef<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Json {
     Invalid,
     Null,
@@ -132,7 +133,9 @@ pub enum Json {
     Object(Obj),
 }
 
-#[derive(Clone, Debug)]
+#[derive(
+    Clone, Debug, PartialEq, EnumIntoGetters, EnumIsA, EnumToGetters,
+)]
 pub enum JsonToken {
     Invalid,
     Null,

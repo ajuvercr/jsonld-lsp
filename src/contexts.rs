@@ -6,8 +6,8 @@ use dashmap::DashMap;
 use json_ld::syntax::context::{definition, FragmentRef, Value};
 use json_ld::{syntax, ExtractContext};
 use locspan::{Meta, Span};
-use log::{debug, error, info};
-use lsp_types::{MessageActionItemProperty, MessageType};
+use log::{debug, error};
+use lsp_types::{MessageType};
 use ropey::Rope;
 
 use crate::backend::Client;
