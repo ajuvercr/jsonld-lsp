@@ -1,3 +1,4 @@
+use crate::utils::log;
 use std::collections::HashMap;
 
 use reqwest::header::HeaderMap;
@@ -11,18 +12,31 @@ pub struct Resp {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn fetch(url: &str, headers: &HashMap<String, String>) -> std::result::Result<Resp, ()> {
-    let client = reqwest::Client::new();
+    // TODO: This should not need to be reqwest blocking, but using the standard reqwest caused a
+    // hang on `send`.
+    // The same happened when testing with hyper
+    // Even blocking didn't work on a later version of reqwest
+    
+    let client = reqwest::blocking::Client::new();
     let builder = client.get(url);
 
     let builder = headers
         .into_iter()
         .fold(builder, |builder, (k, v)| builder.header(k, v));
 
-    let resp = builder.send().await.unwrap();
+    log("sending blcoking");
+    let resp = match builder.send() {
+        Ok(x) => x,
+        Err(e) => {
+            log(format!("Error: {:?}", e));
+            return Err(());
+        }
+    };
+
     let status = resp.status().as_u16();
     let headers = resp.headers().clone();
-
-    let body = resp.text().await.unwrap();
+    log("got resp");
+    let body = resp.text().unwrap();
 
     Ok(Resp {
         headers,

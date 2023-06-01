@@ -3,7 +3,7 @@ use crate::lang::{LangState, SimpleCompletion};
 use crate::lsp_types::*;
 
 use crate::semantics::LEGEND_TYPE;
-use crate::utils::{offset_to_position, init_log, log};
+use crate::utils::{offset_to_position};
 use dashmap::DashMap;
 
 use ropey::Rope;
@@ -50,8 +50,7 @@ pub struct Backend<C: Client> {
 #[tower_lsp::async_trait]
 impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
-        init_log();
-        log("initilalized!");
+
         Ok(InitializeResult {
             server_info: None,
             capabilities: ServerCapabilities {
@@ -234,7 +233,6 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        log("Start completion");
         let id = params.text_document_position.text_document.uri.to_string();
 
         if !self.langs.contains_key(&id) {
@@ -251,9 +249,8 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
 
         let simples = lang.do_completion(ctx).await;
 
-        log(format!("simples {:?}", simples));
-
         let end = params.text_document_position.position;
+        // end.character += 1;
         let start = Position::new(end.line, end.character - 1);
         let range = Range::new(start, end);
 

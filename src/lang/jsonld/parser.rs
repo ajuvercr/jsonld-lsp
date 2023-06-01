@@ -20,7 +20,7 @@ pub fn parse(
     tokens: Vec<Spanned<JsonToken>>,
 ) -> (Spanned<Json>, Vec<Simple<JsonToken>>) {
     let stream = Stream::from_iter(
-        0..source.len(),
+        0..source.len() + 1,
         tokens.into_iter().map(|Spanned(x, s)| (x, s)),
     );
 
@@ -38,6 +38,10 @@ fn munch<T: Clone, C: Container<JsonToken>>(
     default: impl Fn(Range<usize>) -> T + 'static,
 ) -> impl Parser<JsonToken, T, Error = Simple<JsonToken>> {
     let munch = none_of(c)
+        .map(|x| {
+            println!("MUNCHED {}", x);
+            x
+        })
         .repeated()
         .map_with_span(move |_, span| default(span));
 
@@ -50,26 +54,35 @@ fn parser() -> impl Parser<JsonToken, Spanned<Json>, Error = Simple<JsonToken>> 
     recursive(|value| {
         let array = value
             .clone()
-            .recover_with(skip_parser(munch(&[Comma, CuClose], |span| {
-                Spanned(Json::Invalid, span)
-            })))
-            .separated_by(just(Comma).recover_with(skip_then_retry_until([])))
-            .allow_trailing()
+            .recover_with(skip_parser(
+                none_of([SqClose]).to(Json::Invalid).map_with_span(spanned),
+            ))
+            .separated_by(just(Comma))
             .delimited_by(just(SqOpen), just(SqClose))
             .map(Json::Array);
+
+        // let array = just(SqOpen).ignore_then(value.clone().separated_by(just(Comma))).then_ignore(just(SqClose)).map(Json::Array);
 
         let member = filter(JsonToken::is_string)
             .map(JsonToken::into_string)
             .map_with_span(spanned)
-            .then_ignore(filter(JsonToken::is_colon))
-            .then(value.clone())
-            .recover_with(skip_then_retry_until([]));
+            .then_ignore(just(Colon))
+            .then(value.clone());
 
-        let obj = member
-            .map_with_span(spanned)
-            .separated_by(just(Comma).recover_with(skip_then_retry_until([])))
-            .delimited_by(just(CuOpen), just(CuClose))
+        let obj = just(CuOpen)
+            .ignore_then(
+                member
+                    .clone()
+                    .map_with_span(spanned)
+                    .separated_by(just(Comma)),
+            )
+            .then_ignore(just(CuClose))
             .map(Json::Object);
+        // let obj = member
+        //     .map_with_span(spanned)
+        //     .separated_by(just(Comma).recover_with(skip_then_retry_until([])))
+        //     .delimited_by(just(CuOpen), just(CuClose))
+        //     .map(Json::Object);
 
         let null = just(Null).map(Json::Token);
         let t = just(True).map(Json::Token);
@@ -77,14 +90,13 @@ fn parser() -> impl Parser<JsonToken, Spanned<Json>, Error = Simple<JsonToken>> 
         let st = filter(JsonToken::is_string).map(Json::Token);
         let num = filter(JsonToken::is_num).map(Json::Token);
 
-        choice((null, t, f, st, num, obj, array)).map_with_span(spanned)
+        choice((st, array, obj, null, t, f, num)).map_with_span(spanned)
     })
 }
 
 #[cfg(test)]
 mod tests {
-
-    use crate::lang::jsonld::{tokenizer::tokenize, parent};
+    use crate::lang::jsonld::{parent, tokenizer::tokenize};
 
     use super::*;
 
@@ -140,10 +152,20 @@ mod tests {
 
         let vec = parents.to_json_vec().unwrap();
 
-        assert_eq!(
-            vec,
-            b"[\"test\":42]"
-        );
+        assert_eq!(vec, b"[\"test\",42]");
+
+        let source = "{}";
+        let (tokens, token_errors) = tokenize(source);
+        let (json, json_errors) = parse(source, tokens);
+
+        assert!(token_errors.is_empty());
+        assert!(json_errors.is_empty());
+
+        let parents = parent::system(json);
+
+        let vec = parents.to_json_vec().unwrap();
+
+        assert_eq!(vec, b"{}");
     }
 
     #[test]
@@ -167,5 +189,31 @@ mod tests {
                 Json::Token(JsonToken::Num(42, None)),
             ]
         );
+    }
+
+    #[test]
+    fn parse_failed() {
+        let source = r#"
+{
+  "@context": [
+    "https://data.vlaanderen.be/doc/applicatieprofiel/sensoren-en-bemonstering/kandidaatstandaard/2022-04-28/context/ap-sensoren-en-bemonstering.jsonld",
+    {
+      "foaf": "foaf_exp"
+    } 
+  ], "test": "test_exp"
+}
+"#;
+
+        let (tokens, token_errors) = tokenize(source);
+
+        println!(
+            "tokens {:?}",
+            tokens.iter().map(|x| x.value()).collect::<Vec<_>>()
+        );
+        let (json, json_errors) = parse(source, tokens);
+        println!("json {:?}", json.0);
+
+        assert!(token_errors.is_empty());
+        assert_eq!(json_errors.len(), 0);
     }
 }

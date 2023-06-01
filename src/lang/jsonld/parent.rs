@@ -14,6 +14,37 @@ pub enum JsonNode {
     Kv(Spanned<String>, usize),
 }
 
+#[allow(unused)]
+impl JsonNode {
+    pub fn as_leaf(&self) -> Option<&JsonToken> {
+        match self {
+            JsonNode::Leaf(x) => Some(x),
+            _ => None,
+        }
+    }
+
+    pub fn as_array(&self) -> Option<&Vec<usize>> {
+        match self {
+            JsonNode::Array(x) => Some(x),
+            _ => None,
+        }
+    }
+
+    pub fn as_object(&self) -> Option<&Vec<usize>> {
+        match self {
+            JsonNode::Object(x) => Some(x),
+            _ => None,
+        }
+    }
+
+    pub fn as_kv(&self) -> Option<(&Spanned<String>, &usize)> {
+        match self {
+            JsonNode::Kv(ref a, ref b) => Some((a, b)),
+            _ => None,
+        }
+    }
+}
+
 impl ParentingSystem<Spanned<JsonNode>> {
     fn write(&self, node: &Spanned<JsonNode>, write: &mut impl Write) -> io::Result<()> {
         match node.value() {
@@ -24,10 +55,10 @@ impl ParentingSystem<Spanned<JsonNode>> {
                 write!(write, "[")?;
                 if let Some(x) = arr.first() {
                     self.write(&self[*x], write)?;
-                }
-                for i in &arr[1..] {
-                    write!(write, ",")?;
-                    self.write(&self[*i], write)?;
+                    for i in &arr[1..] {
+                        write!(write, ",")?;
+                        self.write(&self[*i], write)?;
+                    }
                 }
                 write!(write, "]")?;
             }
@@ -35,10 +66,10 @@ impl ParentingSystem<Spanned<JsonNode>> {
                 write!(write, "{{")?;
                 if let Some(x) = arr.first() {
                     self.write(&self[*x], write)?;
-                }
-                for i in &arr[1..] {
-                    write!(write, ",")?;
-                    self.write(&self[*i], write)?;
+                    for i in &arr[1..] {
+                        write!(write, ",")?;
+                        self.write(&self[*i], write)?;
+                    }
                 }
                 write!(write, "}}")?;
             }

@@ -16,7 +16,7 @@ static mut LOG_FILE: Option<Mutex<File>> = None;
 pub fn init_log() {
     let file = File::options()
         .write(true)
-        .create(true)
+        .append(true)
         .open("/tmp/jsonld-log.txt")
         .unwrap();
     unsafe { LOG_FILE = Some(Mutex::new(file)) };

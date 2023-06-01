@@ -1,23 +1,17 @@
 use core::fmt;
-use std::{
-    ops::{DerefMut, Range},
-    str::FromStr,
-    sync::Arc,
-};
+use std::{ops::Range, str::FromStr, sync::Arc};
 
 use chumsky::prelude::Simple;
+use futures::lock::Mutex;
 use iref::IriBuf;
-use json_ld::{ContextLoader, Expand, Loader as _};
+use json_ld::ContextLoader;
+use json_ld_syntax::context::AnyValueMut;
 use lsp_types::{CompletionItemKind, SemanticToken, SemanticTokenType};
 use ropey::Rope;
-use tokio::sync::Mutex;
 
 use crate::{
-    contexts::filter_definition,
-    model::Spanned,
-    parent::ParentingSystem,
-    semantics::semantic_tokens,
-    utils::{log, ReqwestLoader},
+    contexts::filter_definition, model::Spanned, parent::ParentingSystem,
+    semantics::semantic_tokens, utils::ReqwestLoader,
 };
 
 use self::{
@@ -53,8 +47,6 @@ impl fmt::Debug for JsonLd {
 impl JsonLd {
     pub fn new(id: String, loader: Arc<Mutex<ReqwestLoader<IriBuf>>>) -> Self {
         let parents = parent::system(Spanned(Json::Token(JsonToken::Null), 0..0));
-
-        log(format!("parents {:?}", parents));
 
         Self {
             id,
@@ -109,10 +101,9 @@ impl Lang for JsonLd {
     ) {
         system
             .iter()
-            .filter(|(_, x)| x.is_kv())
-            .map(|(_, x)| x.to_kv())
+            .flat_map(|(_, x)| x.as_kv())
             .filter(|(ref x, _)| x.value() == "@id")
-            .map(|(_, id)| &system[id])
+            .map(|(_, id)| &system[*id])
             .filter(|x| x.is_leaf())
             .map(|x| x.clone().map(|x| x.into_leaf()))
             .filter(|x| x.is_string())
@@ -130,8 +121,6 @@ impl Lang for JsonLd {
 #[async_trait::async_trait]
 impl LangState for JsonLd {
     async fn update(&mut self, parents: ParentingSystem<Spanned<<JsonLd as Lang>::Node>>) {
-        log(format!("parents {:?}", parents));
-
         self.parents = parents;
         if let Ok(bytes) = self.parents.to_json_vec() {
             self.loader
@@ -146,7 +135,6 @@ impl LangState for JsonLd {
     }
 
     async fn do_completion(&mut self, trigger: Option<String>) -> Vec<super::SimpleCompletion> {
-        use json_ld::ExtractContext;
         if trigger == Some("@".to_string()) {
             self.get_ids()
                 .into_iter()
@@ -155,7 +143,7 @@ impl LangState for JsonLd {
 
                     SimpleCompletion {
                         documentation: Some(format!("Subject: {x}")),
-                        edit: format!("{{\"@id\": \"{x}\" }}"),
+                        edit: format!("{{\"@id\": \"{x}\"}}"),
                         kind: CompletionItemKind::VARIABLE,
                         label: x,
                         sort_text: w.clone(),
@@ -166,24 +154,57 @@ impl LangState for JsonLd {
         } else {
             let iri = iref::IriBuf::from_str(&self.id).unwrap();
             let mut loader = self.loader.lock().await;
-            let doc = loader.load(iri).await.unwrap();
-            doc.expand(loader.deref_mut()).await.unwrap();
+            let doc = loader.load_context(iri.clone()).await.unwrap();
+            let mut x = doc.into_document();
 
-            <json_ld_syntax::Value<locspan::Location<IriBuf>>>::extract_context(doc.into_document())
-                .map(|x| {
-                    x.traverse()
-                        .filter_map(filter_definition)
-                        .map(|v| SimpleCompletion {
-                            kind: CompletionItemKind::PROPERTY,
-                            label: v.key.to_string(),
-                            documentation: Some(format!("\"{}\"", v.value)),
-                            sort_text: None,
-                            filter_text: None,
-                            edit: format!("\"{}\"", v.value),
-                        })
-                        .collect()
+            let context_ids: Vec<_> = self
+                .parents
+                .iter()
+                .map(|(_, x)| x)
+                .filter(|x| x.is_kv())
+                .map(|x| x.value().clone().into_kv())
+                .filter(|(x, _)| x.value() == "@context")
+                .map(|(_, id)| &self.parents[id])
+                .flat_map(|x| {
+                    if let Some(leaf_st) = x.as_leaf().and_then(|x| x.as_string()) {
+                        return vec![leaf_st.clone()];
+                    }
+                    if let Some(arr) = x.as_array() {
+                        return arr
+                            .iter()
+                            .map(|x| &self.parents[*x])
+                            .flat_map(|x| x.as_leaf())
+                            .flat_map(|x| x.as_string())
+                            .cloned()
+                            .collect();
+                    }
+                    Vec::new()
                 })
-                .unwrap_or_default()
+                .collect();
+
+            for id in context_ids
+                .iter()
+                .flat_map(|x| iref::IriRefBuf::from_str(x))
+            {
+                let resolved = id.resolved(&iri);
+                let doc = loader.load_context(resolved).await.unwrap();
+                let y = doc.into_document().0;
+                x.append(y);
+            }
+
+            // doc.expand(loader.deref_mut()).await.unwrap();
+
+            x.traverse()
+                .filter_map(filter_definition)
+                .map(|v| SimpleCompletion {
+                    kind: CompletionItemKind::PROPERTY,
+                    label: v.key.to_string(),
+                    documentation: Some(format!("{} -> \"{}\"", v.key, v.value)),
+                    sort_text: None,
+                    filter_text: None,
+                    edit: format!("\"{}", v.key),
+                })
+                .collect()
         }
     }
 }
@@ -194,17 +215,16 @@ impl JsonLd {
             .parents
             .iter()
             .map(|(_, x)| x)
-            .filter(|x| x.is_kv())
-            .map(|x| x.to_kv())
+            .flat_map(|x| x.as_kv())
             .filter(|(id, _)| id.value() == "@id")
-            .map(|(_, idx)| idx);
+            .map(|(_, idx)| idx)
+            .copied();
 
         let ids = id_indices
             .map(|x| &self.parents[x].0)
-            .filter(|x| x.is_leaf())
-            .map(|x| x.to_leaf())
-            .filter(|x| x.is_string())
-            .map(|x| x.into_string());
+            .flat_map(|x| x.as_leaf())
+            .flat_map(|x| x.as_string())
+            .cloned();
 
         ids.collect()
     }
