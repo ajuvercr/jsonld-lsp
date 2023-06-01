@@ -36,6 +36,23 @@ pub enum JsonToken {
     Num(u32, Option<u32>),
 }
 
+#[allow(unused)]
+impl JsonToken {
+    pub fn as_string(&self) -> Option<&String> {
+        match self {
+            Self::String(x) => Some(x),
+            _ => None,
+        }
+    }
+
+    pub fn as_num(&self) -> Option<(&u32, &Option<u32>)> {
+        match self {
+            Self::Num(ref x, ref y) => Some((x, y)),
+            _ => None,
+        }
+    }
+}
+
 impl Token for JsonToken {
     fn token(&self) -> Option<lsp_types::SemanticTokenType> {
         use lsp_types::SemanticTokenType;

@@ -8,10 +8,10 @@ use locspan::{Meta, Span};
 use mime::Mime;
 use once_cell::sync::OnceCell;
 use rdf_types::{vocabulary::Index, IriVocabulary, IriVocabularyMut};
-use reqwest::{header::CONTENT_TYPE, StatusCode};
+use reqwest::StatusCode;
 use std::{collections::HashMap, fmt, hash::Hash, str::FromStr, string::FromUtf8Error};
 
-use super::{fetch::fetch, log};
+use super::{fetch::fetch};
 
 /// Loader options.
 pub struct Options<I> {
@@ -222,11 +222,7 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
         I: 'a,
     {
         async move {
-            log(format!("loading {}", url.as_ref()));
             if let Some(bytes) = self.cache.get(&url) {
-                log(format!("cache hit! {} {}", url.as_ref(), unsafe {
-                    std::str::from_utf8_unchecked(&bytes)
-                }));
                 let document =
                     (*self.parser)(vocabulary, &url, bytes.clone()).map_err(Error::Parse)?;
 
@@ -239,8 +235,6 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
                 return Ok(document);
             }
 
-            log("no cache hit");
-
             let data = self
                 .data
                 .get_or_init(|| Data::new(&self.options, vocabulary));
@@ -252,8 +246,7 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
                     return Err(Error::TooManyRedirections);
                 }
                 let mut headers = HashMap::new();
-                headers.insert("Accept".to_string(), data.accept_header.to_string());
-
+                headers.insert("accept".to_string(), data.accept_header.to_string());
 
                 let resp = fetch(url.as_ref(), &headers).await.unwrap();
 
@@ -261,53 +254,24 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
 
                 match status {
                     StatusCode::OK => {
-                        let content_type: Vec<&str> = resp
-                            .headers
-                            .get(CONTENT_TYPE)
-                            .map(|x| x.to_str().unwrap().split(";").map(|x| x.trim()).collect())
-                            .unwrap_or_default();
-                        //
-                        match content_type.iter().next() {
-                            Some(_) => {
-                                let profile = HashSet::new();
+                        let profile = HashSet::new();
 
-                                let bytes = Bytes::from(resp.body.into_bytes());
+                        let bytes = Bytes::from(resp.body.into_bytes());
 
-                                let document = (*self.parser)(vocabulary, &url, bytes.clone())
-                                    .map_err(Error::Parse)?;
+                        let document = (*self.parser)(vocabulary, &url, bytes.clone())
+                            .map_err(Error::Parse)?;
+                        self.cache.insert(url.clone(), bytes);
 
-                                log(format!("setting cache {} hit! {}", url.as_ref(), unsafe {
-                                    std::str::from_utf8_unchecked(&bytes)
-                                }));
-                                self.cache.insert(url.clone(), bytes);
+                        let document = RemoteDocument::new_full(
+                            Some(url),
+                            Some(Mime::from_str("application/json+ld").unwrap()),
+                            None,
+                            profile,
+                            document,
+                        );
 
-                                let document = RemoteDocument::new_full(
-                                    Some(url),
-                                    Some(Mime::from_str("application/json+ld").unwrap()),
-                                    None,
-                                    profile,
-                                    document,
-                                );
+                        break Ok(document);
 
-                                break Ok(document);
-                            }
-                            None => {
-                                // for link in resp.headers.get(LINK).into_iter() {
-                                //     if let Some(link) = Link::new(link) {
-                                //         if link.rel() == Some(b"alternate")
-                                //             && link.type_() == Some(b"application/ld+json")
-                                //         {
-                                //             log::debug!("link found");
-                                //             let u =
-                                //                 link.href().resolved(vocabulary.iri(&url).unwrap());
-                                //             url = vocabulary.insert(u.as_iri());
-                                //             redirection_number += 1;
-                                //             continue 'next_url;
-                                //         }
-                                //     }
-                                // }
-                            }
-                        };
                         // match content_types.find(ContentType::is_json_ld) {
                         //     Some(content_type) => {
                         //     }
@@ -332,7 +296,7 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
                         //         break Err(Error::InvalidContentType);
                         //     }
                         // }
-                        break Err(Error::InvalidContentType);
+                        // break Err(Error::InvalidContentType);
                     }
                     StatusCode::SEE_OTHER => {
                         break Err(Error::Redirection303);

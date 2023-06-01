@@ -61,8 +61,12 @@ impl<E> ParentingSystem<E> {
 }
 
 impl<E: ParentElement> ParentingSystem<E> {
-    pub fn iter_desc<'a>(&'a self, self_first: bool) -> impl Iterator<Item = &'a E> {
-        if let Some(idx) = self.start {
+    pub fn iter_desc<'a>(
+        &'a self,
+        self_first: bool,
+        start: Option<usize>,
+    ) -> impl Iterator<Item = &'a E> {
+        if let Some(idx) = start.or(self.start) {
             let root_iter = &self[idx];
             Pos::Some(DescendIter {
                 first: self_first,
