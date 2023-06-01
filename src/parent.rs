@@ -5,10 +5,11 @@ pub trait ParentElement {
     fn iter(&self) -> Self::I;
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ParentingSystem<E> {
-    objects: Vec<E>,
+    pub objects: Vec<E>,
     parents: Vec<usize>,
+    pub start: Option<usize>,
 }
 
 impl<E> ParentingSystem<E> {
@@ -16,8 +17,18 @@ impl<E> ParentingSystem<E> {
         Self {
             objects: Vec::new(),
             parents: Vec::new(),
+            start: None,
         }
     }
+
+    pub fn start_element(&self) -> Option<&E> {
+        if let Some(x) = self.start {
+            Some(&self[x])
+        } else {
+            None
+        }
+    }
+
     pub fn add(&mut self, item: E, parent: usize) -> usize {
         let out = self.parents.len();
 
@@ -51,12 +62,16 @@ impl<E> ParentingSystem<E> {
 
 impl<E: ParentElement> ParentingSystem<E> {
     pub fn iter_desc<'a>(&'a self, self_first: bool) -> impl Iterator<Item = &'a E> {
-        let root_iter = self[0].iter();
-        DescendIter {
-            first: self_first,
-            self_first,
-            parents: self,
-            iters: vec![(root_iter, 0)],
+        if let Some(idx) = self.start {
+            let root_iter = &self[idx];
+            Pos::Some(DescendIter {
+                first: self_first,
+                self_first,
+                parents: self,
+                iters: vec![(root_iter.iter(), idx)],
+            })
+        } else {
+            Pos::Nope
         }
     }
 }
@@ -75,6 +90,11 @@ impl<E> IndexMut<usize> for ParentingSystem<E> {
     }
 }
 
+pub enum Pos<T> {
+    Nope,
+    Some(T),
+}
+
 pub struct DescendIter<'a, E: ParentElement> {
     first: bool,
     parents: &'a ParentingSystem<E>,
@@ -82,30 +102,34 @@ pub struct DescendIter<'a, E: ParentElement> {
     self_first: bool,
 }
 
-impl<'a, E: ParentElement> Iterator for DescendIter<'a, E> {
+impl<'a, E: ParentElement> Iterator for Pos<DescendIter<'a, E>> {
     type Item = &'a E;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (mut x, index) = self.iters.pop()?;
+        let this = match self {
+            Pos::Nope => return None,
+            Pos::Some(ref mut x) => x,
+        };
+        let (mut x, index) = this.iters.pop()?;
 
-        if self.first && self.self_first {
-            self.first = false;
-            if self.self_first {
-                self.iters.push((x, index));
-                return Some(&self.parents[index]);
+        if this.first && this.self_first {
+            this.first = false;
+            if this.self_first {
+                this.iters.push((x, index));
+                return Some(&this.parents[index]);
             }
         }
 
         if let Some(n) = x.next() {
-            self.iters.push((x, index));
-            self.iters.push((self.parents[n].iter(), n));
-            if self.self_first {
-                return Some(&self.parents[n]);
+            this.iters.push((x, index));
+            this.iters.push((this.parents[n].iter(), n));
+            if this.self_first {
+                return Some(&this.parents[n]);
             }
         } else {
-            if !self.self_first {
-                self.iters.push((x, index));
-                return Some(&self.parents[index]);
+            if !this.self_first {
+                this.iters.push((x, index));
+                return Some(&this.parents[index]);
             }
         }
 

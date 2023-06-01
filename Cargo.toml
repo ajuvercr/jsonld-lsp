@@ -40,7 +40,6 @@ hashbrown = "0.13.2"
 console_error_panic_hook = "0.1.7"
 thiserror = "1.0.40"
 enum-methods = "0.0.8"
-enum-as-inner = "0.5.2"
 as_variant = "1.1.0"
 async-trait = "0.1.68"
 

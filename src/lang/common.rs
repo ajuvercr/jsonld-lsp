@@ -10,6 +10,7 @@ pub struct SimpleDiagnostic {
     pub msg: String,
 }
 
+#[derive(Debug)]
 pub struct SimpleCompletion {
     pub kind: CompletionItemKind,
     pub label: String,
@@ -114,11 +115,14 @@ where
 
         let (elements, errors) = self.parse(source, &tokens);
 
+        if !errors.is_empty() {
+            return errors.into_iter().map(|x| x.into()).collect();
+        }
         let parenting = self.parents(&elements);
 
         self.update(parenting).await;
 
-        errors.into_iter().map(|x| x.into()).collect()
+        Vec::new()
     }
 
     async fn do_completion(&mut self, trigger: Option<String>) -> Vec<SimpleCompletion>;

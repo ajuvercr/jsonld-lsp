@@ -208,18 +208,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "enum-as-inner"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "356538125fac8ab67d41d09b010daa294659f0b6279a175a947ad5c254b6114c"
-dependencies = [
- "heck",
- "proc-macro2",
- "quote 1.0.28",
- "syn 2.0.18",
-]
-
-[[package]]
 name = "enum-methods"
 version = "0.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -438,12 +426,6 @@ checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
 dependencies = [
  "ahash 0.8.3",
 ]
-
-[[package]]
-name = "heck"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 
 [[package]]
 name = "hermit-abi"
@@ -789,7 +771,6 @@ dependencies = [
  "chumsky",
  "console_error_panic_hook",
  "dashmap",
- "enum-as-inner",
  "enum-methods",
  "env_logger",
  "futures",
