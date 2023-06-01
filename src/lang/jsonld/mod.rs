@@ -1,16 +1,23 @@
 use core::fmt;
-use std::{ops::Range, str::FromStr, sync::Arc};
+use std::{
+    ops::{DerefMut, Range},
+    str::FromStr,
+    sync::Arc,
+};
 
 use chumsky::prelude::Simple;
 use iref::IriBuf;
-use json_ld::ContextLoader;
+use json_ld::{ContextLoader, Expand, Loader as _};
 use lsp_types::{CompletionItemKind, SemanticToken, SemanticTokenType};
 use ropey::Rope;
 use tokio::sync::Mutex;
 
 use crate::{
-    contexts::filter_definition, model::Spanned, parent::ParentingSystem,
-    semantics::semantic_tokens, utils::ReqwestLoader,
+    contexts::filter_definition,
+    model::Spanned,
+    parent::ParentingSystem,
+    semantics::semantic_tokens,
+    utils::{log, ReqwestLoader},
 };
 
 use self::{
@@ -46,6 +53,8 @@ impl fmt::Debug for JsonLd {
 impl JsonLd {
     pub fn new(id: String, loader: Arc<Mutex<ReqwestLoader<IriBuf>>>) -> Self {
         let parents = parent::system(Spanned(Json::Token(JsonToken::Null), 0..0));
+
+        log(format!("parents {:?}", parents));
 
         Self {
             id,
@@ -121,6 +130,8 @@ impl Lang for JsonLd {
 #[async_trait::async_trait]
 impl LangState for JsonLd {
     async fn update(&mut self, parents: ParentingSystem<Spanned<<JsonLd as Lang>::Node>>) {
+        log(format!("parents {:?}", parents));
+
         self.parents = parents;
         if let Ok(bytes) = self.parents.to_json_vec() {
             self.loader
@@ -135,6 +146,7 @@ impl LangState for JsonLd {
     }
 
     async fn do_completion(&mut self, trigger: Option<String>) -> Vec<super::SimpleCompletion> {
+        use json_ld::ExtractContext;
         if trigger == Some("@".to_string()) {
             self.get_ids()
                 .into_iter()
@@ -153,21 +165,25 @@ impl LangState for JsonLd {
                 .collect()
         } else {
             let iri = iref::IriBuf::from_str(&self.id).unwrap();
-            let doc = self.loader.lock().await.load_context(iri).await.unwrap();
+            let mut loader = self.loader.lock().await;
+            let doc = loader.load(iri).await.unwrap();
+            doc.expand(loader.deref_mut()).await.unwrap();
 
-            doc.into_document()
-                .into_value()
-                .traverse()
-                .filter_map(filter_definition)
-                .map(|v| SimpleCompletion {
-                    kind: CompletionItemKind::PROPERTY,
-                    label: v.key.to_string(),
-                    documentation: Some(format!("\"{}\"", v.value)),
-                    sort_text: None,
-                    filter_text: None,
-                    edit: format!("\"{}\"", v.value),
+            <json_ld_syntax::Value<locspan::Location<IriBuf>>>::extract_context(doc.into_document())
+                .map(|x| {
+                    x.traverse()
+                        .filter_map(filter_definition)
+                        .map(|v| SimpleCompletion {
+                            kind: CompletionItemKind::PROPERTY,
+                            label: v.key.to_string(),
+                            documentation: Some(format!("\"{}\"", v.value)),
+                            sort_text: None,
+                            filter_text: None,
+                            edit: format!("\"{}\"", v.value),
+                        })
+                        .collect()
                 })
-                .collect()
+                .unwrap_or_default()
         }
     }
 }

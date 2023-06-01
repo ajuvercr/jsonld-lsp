@@ -11,7 +11,7 @@ use rdf_types::{vocabulary::Index, IriVocabulary, IriVocabularyMut};
 use reqwest::{header::CONTENT_TYPE, StatusCode};
 use std::{collections::HashMap, fmt, hash::Hash, str::FromStr, string::FromUtf8Error};
 
-use super::fetch::fetch;
+use super::{fetch::fetch, log};
 
 /// Loader options.
 pub struct Options<I> {
@@ -222,24 +222,29 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
         I: 'a,
     {
         async move {
+            log(format!("loading {}", url.as_ref()));
             if let Some(bytes) = self.cache.get(&url) {
+                log(format!("cache hit! {} {}", url.as_ref(), unsafe {
+                    std::str::from_utf8_unchecked(&bytes)
+                }));
                 let document =
                     (*self.parser)(vocabulary, &url, bytes.clone()).map_err(Error::Parse)?;
 
-                let document = RemoteDocument::new_full(
+                let document = RemoteDocument::new(
                     Some(url),
                     Some(Mime::from_str("application/json+ld").unwrap()),
-                    None,
-                    HashSet::new(),
                     document,
                 );
 
                 return Ok(document);
             }
 
+            log("no cache hit");
+
             let data = self
                 .data
                 .get_or_init(|| Data::new(&self.options, vocabulary));
+
             let mut redirection_number = 0;
 
             loop {
@@ -248,6 +253,7 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
                 }
                 let mut headers = HashMap::new();
                 headers.insert("Accept".to_string(), data.accept_header.to_string());
+
 
                 let resp = fetch(url.as_ref(), &headers).await.unwrap();
 
@@ -270,6 +276,9 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
                                 let document = (*self.parser)(vocabulary, &url, bytes.clone())
                                     .map_err(Error::Parse)?;
 
+                                log(format!("setting cache {} hit! {}", url.as_ref(), unsafe {
+                                    std::str::from_utf8_unchecked(&bytes)
+                                }));
                                 self.cache.insert(url.clone(), bytes);
 
                                 let document = RemoteDocument::new_full(

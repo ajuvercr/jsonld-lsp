@@ -1,5 +1,6 @@
-
 mod loader;
+use std::{fmt::Display, fs::File, sync::Mutex};
+
 pub use loader::*;
 
 mod fetch;
@@ -9,6 +10,29 @@ pub mod web_types;
 
 use crate::lsp_types::{Position, Range};
 use ropey::Rope;
+
+static mut LOG_FILE: Option<Mutex<File>> = None;
+
+pub fn init_log() {
+    let file = File::options()
+        .write(true)
+        .create(true)
+        .open("/tmp/jsonld-log.txt")
+        .unwrap();
+    unsafe { LOG_FILE = Some(Mutex::new(file)) };
+}
+
+pub fn log(msg: impl Display) {
+    use std::io::Write;
+
+    unsafe {
+        if let Some(ref file) = LOG_FILE {
+            if let Ok(mut f) = file.lock() {
+                write!(f, "{}\n", msg).unwrap();
+            }
+        }
+    }
+}
 
 pub fn offset_to_position(offset: usize, rope: &Rope) -> Option<Position> {
     let line = rope.try_char_to_line(offset).ok()?;

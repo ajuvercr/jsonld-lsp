@@ -54,7 +54,9 @@ impl ParentingSystem<Spanned<JsonNode>> {
     pub fn to_json_vec(&self) -> io::Result<Vec<u8>> {
         let mut cursor = Cursor::new(Vec::new());
 
-        self.write(&self[0], &mut cursor)?;
+        if let Some(x) = self.start_element() {
+            self.write(&x, &mut cursor)?;
+        }
 
         Ok(cursor.into_inner())
     }
@@ -62,7 +64,7 @@ impl ParentingSystem<Spanned<JsonNode>> {
 
 pub fn system(element: Spanned<Json>) -> ParentingSystem<Spanned<JsonNode>> {
     let mut system = ParentingSystem::new();
-    add(element, 0, &mut system);
+    system.start = add(element, 0, &mut system);
     system
 }
 
