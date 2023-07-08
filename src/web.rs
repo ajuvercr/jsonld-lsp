@@ -40,6 +40,12 @@ fn log_message(msg: JsValue) -> Result<(), String> {
     Ok(())
 }
 
+pub fn log_msg(msg: impl std::fmt::Display) {
+    if let Err(e) = log_message(msg.to_string().into()) {
+        let _ = log_message(format!("Failed logging msg {}", e).into());
+    }
+}
+
 #[wasm_bindgen]
 pub struct WebClient;
 #[wasm_bindgen]

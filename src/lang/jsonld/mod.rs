@@ -3,15 +3,17 @@ use std::{ops::Range, str::FromStr, sync::Arc};
 
 use chumsky::prelude::Simple;
 use futures::lock::Mutex;
+use hashbrown::HashMap;
 use iref::IriBuf;
-use json_ld::ContextLoader;
-use json_ld_syntax::context::AnyValueMut;
+use json_ld::{ContextLoader, ExtractContext};
+use json_ld_syntax::context::{AnyValueMut, Value};
+use locspan::Span;
 use lsp_types::{CompletionItemKind, SemanticToken, SemanticTokenType};
 use ropey::Rope;
 
 use crate::{
     contexts::filter_definition, model::Spanned, parent::ParentingSystem,
-    semantics::semantic_tokens, utils::ReqwestLoader,
+    semantics::semantic_tokens, utils::ReqwestLoader, web,
 };
 
 use self::{
@@ -27,11 +29,50 @@ pub mod parser;
 pub mod tokenizer;
 
 type Parents = ParentingSystem<Spanned<<JsonLd as Lang>::Node>>;
-pub type Loader = Arc<Mutex<ReqwestLoader<IriBuf>>>;
+pub type Cache = Arc<Mutex<HashMap<String, Value<Span>>>>;
+// pub type Loader = Arc<Mutex<ReqwestLoader<IriBuf>>>;
+//
+
+async fn load_ctx(cache: &Cache, id: &str) -> Value<Span> {
+    {
+        let c = cache.lock().await;
+
+        if let Some(cached) = c.get(id) {
+            return cached.clone();
+        }
+    }
+
+    let mut loader = ReqwestLoader::default();
+    let ctx = loader
+        .load_context(IriBuf::from_string(id.to_string()).unwrap())
+        .await
+        .unwrap();
+
+    let out = ctx.into_document().into_value();
+
+    let mut c = cache.lock().await;
+    c.insert(id.to_string(), out.clone());
+    out
+}
+
+async fn set_ctx(cache: &Cache, id: &str, json: String) {
+    use json_ld::syntax::{Parse as _, Value};
+
+    let value = Value::parse_str(
+        &json,
+        |span| span, // keep the source `Span` of each element as metadata.
+    )
+    .expect("unable to parse file");
+
+    let ctx = ExtractContext::extract_context(value).unwrap();
+
+    let mut c = cache.lock().await;
+    c.insert(id.to_string(), ctx.into_value());
+}
 
 pub struct JsonLd {
     id: String,
-    loader: Loader,
+    cache: Cache,
     parents: Parents,
     rope: Rope,
 }
@@ -45,12 +86,12 @@ impl fmt::Debug for JsonLd {
 }
 
 impl JsonLd {
-    pub fn new(id: String, loader: Arc<Mutex<ReqwestLoader<IriBuf>>>) -> Self {
+    pub fn new(id: String, cache: Cache) -> Self {
         let parents = parent::system(Spanned(Json::Token(JsonToken::Null), 0..0));
 
         Self {
             id,
-            loader,
+            cache,
             parents,
             rope: Rope::from(""),
         }
@@ -74,6 +115,10 @@ impl Lang for JsonLd {
     type Element = Json;
 
     type ElementError = Simple<JsonToken>;
+
+    type RenameError = ();
+
+    type PrepareRenameError = ();
 
     type Node = JsonNode;
 
@@ -116,6 +161,45 @@ impl Lang for JsonLd {
             .filter(|(ref x, _)| x.value().starts_with("@"))
             .for_each(|(x, _)| apply(x.span().clone(), SemanticTokenType::KEYWORD));
     }
+
+    fn prepare_rename(
+        &self,
+        pos: usize,
+    ) -> Result<(std::ops::Range<usize>, String), Self::PrepareRenameError> {
+        self.parents
+            .iter()
+            .map(|(_, x)| x)
+            .filter(|x| x.is_kv())
+            .map(|x| x.value().clone().into_kv())
+            .filter(|(x, _)| x.value() == "@id")
+            .map(|(_, id)| &self.parents[id])
+            .filter(|x| x.span().contains(&pos))
+            .filter_map(|x| x.as_leaf().map(|y| (x.span().clone(), y)))
+            .find_map(|(range, x)| x.as_string().cloned().map(|x| (range, x)))
+            .ok_or(())
+    }
+
+    fn rename(
+        &self,
+        pos: usize,
+        new_name: String,
+    ) -> Result<Vec<(std::ops::Range<usize>, String)>, Self::RenameError> {
+        let (_, name) = self.prepare_rename(pos)?;
+
+        Ok(self
+            .parents
+            .iter()
+            .map(|(_, x)| x)
+            .filter(|x| x.is_kv())
+            .map(|x| x.value().clone().into_kv())
+            .filter(|(x, _)| x.value() == "@id")
+            .map(|(_, id)| &self.parents[id])
+            .filter_map(|x| x.as_leaf().map(|y| (x.span().clone(), y)))
+            .filter_map(|(range, x)| x.as_string().cloned().map(|x| (range, x)))
+            .filter(|(_, x)| x == &name)
+            .map(|(range, _)| (range, new_name.clone()))
+            .collect())
+    }
 }
 
 #[async_trait::async_trait]
@@ -123,10 +207,12 @@ impl LangState for JsonLd {
     async fn update(&mut self, parents: ParentingSystem<Spanned<<JsonLd as Lang>::Node>>) {
         self.parents = parents;
         if let Ok(bytes) = self.parents.to_json_vec() {
-            self.loader
-                .lock()
-                .await
-                .set_document(IriBuf::from_str(&self.id).unwrap(), bytes);
+            let st = String::from_utf8(bytes).unwrap();
+            set_ctx(&self.cache, &self.id, st).await;
+            // self.loader
+            //     .lock()
+            //     .unwrap()
+            //     .set_document(IriBuf::from_str(&self.id).unwrap(), bytes);
         }
     }
 
@@ -152,10 +238,8 @@ impl LangState for JsonLd {
                 })
                 .collect()
         } else {
-            let iri = iref::IriBuf::from_str(&self.id).unwrap();
-            let mut loader = self.loader.lock().await;
-            let doc = loader.load_context(iri.clone()).await.unwrap();
-            let mut x = doc.into_document();
+            let iri = IriBuf::from_str(&self.id).unwrap();
+            let mut x = load_ctx(&self.cache, &self.id).await;
 
             let context_ids: Vec<_> = self
                 .parents
@@ -187,8 +271,8 @@ impl LangState for JsonLd {
                 .flat_map(|x| iref::IriRefBuf::from_str(x))
             {
                 let resolved = id.resolved(&iri);
-                let doc = loader.load_context(resolved).await.unwrap();
-                let y = doc.into_document().0;
+                // let fut = self.cache.lock().unwrap().load_context(resolved);
+                let y = load_ctx(&self.cache, resolved.as_str()).await;
                 x.append(y);
             }
 
@@ -201,7 +285,7 @@ impl LangState for JsonLd {
                     label: v.key.to_string(),
                     documentation: Some(format!("{} -> \"{}\"", v.key, v.value)),
                     sort_text: None,
-                    filter_text: None,
+                    filter_text: format!("\"{}", v.key).into(),
                     edit: format!("\"{}", v.key),
                 })
                 .collect()

@@ -1,8 +1,3 @@
 {
-  "@context": [
-    "https://data.vlaanderen.be/doc/applicatieprofiel/sensoren-en-bemonstering/kandidaatstandaard/2022-04-28/context/ap-sensoren-en-bemonstering.jsonld",
-    {
-      "foaf": "test/name"
-    }
- ], "@id": "test.com", "test/name": "test": "Geometrie.wkt": {"@id": "test.com" }
+    "@context": "https://raw.githubusercontent.com/json-ld/json-ld.org/main/contexts/person.jsonld"
 }

@@ -84,7 +84,7 @@
 
     const res = await server?.completion({
       context: {
-        triggerKind: context.explicit ? 1 : 2,
+        triggerKind:  2,//context.explicit ? 1 : 2,
         triggerCharacter,
       },
       textDocument: { uri: documentUri },
@@ -94,30 +94,23 @@
     if (!res) return null;
 
     const options: Completion[] = [];
-
     for (let c of res) {
-      const apply = c.textEdit
-        ? (view: EditorView) => {
-            const from = positionToNum(c.textEdit.range.start);
-            const to = positionToNum(c.textEdit.range.end);
-            let changes = [];
-            changes.push({ from, to, insert: c.textEdit.newText });
-            view.dispatch({ changes });
-          }
-        : undefined;
       options.push({
-        label: c.label,
-        type: "function", // TODO
-        apply,
+        label: c.filterText || c.textEdit.newText,
+        type: c.kind === 6 ? "variable" : "property", 
+        apply: c.textEdit?.newText,
+        detail: c.documentation
       });
     }
 
-    return {
-      from: tagBefore ? nodeBefore.from + tagBefore.index : context.pos - 1,
+
+    const out = {
+      from: tagBefore ? nodeBefore.from + tagBefore.index - 1 : context.pos - 1,
       options,
       // options: tagOptions,
       validFor: /^([^\s"@]*)?$/,
     };
+    return out;
   }
 
   const linterExtension = linter((view) => {

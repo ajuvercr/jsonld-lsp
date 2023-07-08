@@ -7,7 +7,7 @@ use json_ld::syntax::context::{definition, FragmentRef, Value};
 use json_ld::{syntax, ExtractContext};
 use locspan::{Meta, Span};
 use log::{debug, error};
-use lsp_types::{MessageType};
+use lsp_types::MessageType;
 use ropey::Rope;
 
 use crate::backend::Client;
@@ -30,7 +30,9 @@ impl std::fmt::Debug for CtxResolver {
             .map(|x| {
                 let v = match x.value() {
                     Ok(_) => Cow::Borrowed("Loaded"),
-                    Err(RemoteError::LoaderFail(i)) => Cow::Owned(format!("LoadFailed({})", i)),
+                    Err(RemoteError::LoaderFail(m, i)) => {
+                        Cow::Owned(format!("LoadFailed({}, {})", m, i))
+                    }
                     Err(RemoteError::InvalidIri) => Cow::Borrowed("Loaded"),
                     Err(RemoteError::Offline) => Cow::Borrowed("Offline"),
                 };
@@ -60,10 +62,11 @@ impl CtxResolver {
 }
 
 #[allow(unused)]
+#[derive(Debug)]
 enum RemoteError {
     Offline,
     InvalidIri,
-    LoaderFail(u16),
+    LoaderFail(String, u16),
 }
 
 struct Resolver<'a> {
@@ -86,7 +89,7 @@ async fn try_load_remote<C: Client + Sync>(uri: &str, c: &C) -> Result<Context, 
     let doc = loader
         .load_context(iri)
         .await
-        .map_err(|_| RemoteError::LoaderFail(1))?;
+        .map_err(|e| RemoteError::LoaderFail(format!("{:?}", e), 1))?;
 
     let definitions: HashMap<String, Definition> = doc
         .into_document()
@@ -200,11 +203,11 @@ impl<'a> Resolver<'a> {
                 debug!("that we already found once (ok {})", remote.is_ok());
                 match remote.value_mut() {
                     Ok(x) => context.merge(&x),
-                    Err(RemoteError::LoaderFail(tr)) => {
+                    Err(RemoteError::LoaderFail(m, tr)) => {
                         if *tr < 5 {
                             let new_context = try_load_remote(uri.as_str(), c)
                                 .await
-                                .map_err(|_| RemoteError::LoaderFail(*tr + 1));
+                                .map_err(|_| RemoteError::LoaderFail(m.to_string(), *tr + 1));
                             if let Ok(x) = &new_context {
                                 context.merge(&x);
                             }
@@ -222,8 +225,12 @@ impl<'a> Resolver<'a> {
                     format!("Found new context {}", new_context.is_ok()),
                 )
                 .await;
-                if let Ok(x) = &new_context {
-                    context.merge(&x);
+                match &new_context {
+                    Ok(x) => context.merge(&x),
+                    Err(e) => {
+                        c.log_message(MessageType::ERROR, format!("Failed {:?}", e))
+                            .await;
+                    }
                 }
                 debug!("looked it up (ok {})", new_context.is_ok());
                 self.remote_contexts.insert(uri.to_string(), new_context);
@@ -299,7 +306,9 @@ fn get_definition_ref<M: Send + Sync + Clone>(
     }
 }
 
-pub fn filter_definition<M: Sync + Send + Clone>(frag: FragmentRef<M, Value<M>>) -> Option<Definition> {
+pub fn filter_definition<M: Sync + Send + Clone>(
+    frag: FragmentRef<M, Value<M>>,
+) -> Option<Definition> {
     match frag {
         FragmentRef::DefinitionFragment(x) => get_definition_ref(&x),
         _ => None,
