@@ -75,6 +75,9 @@ pub trait Lang {
     type Element;
     type ElementError;
 
+    type RenameError;
+    type PrepareRenameError;
+
     type Node: Node<Self::Token>;
 
     fn tokenize(&mut self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>);
@@ -90,6 +93,17 @@ pub trait Lang {
         system: &ParentingSystem<Spanned<Self::Node>>,
         apply: impl FnMut(Range<usize>, SemanticTokenType) -> (),
     );
+
+    fn prepare_rename(
+        &self,
+        pos: usize,
+    ) -> Result<(std::ops::Range<usize>, String), Self::PrepareRenameError>;
+
+    fn rename(
+        &self,
+        pos: usize,
+        new_name: String,
+    ) -> Result<Vec<(std::ops::Range<usize>, String)>, Self::RenameError>;
 }
 
 #[async_trait::async_trait]

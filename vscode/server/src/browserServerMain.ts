@@ -56,7 +56,8 @@ connection.onDidOpenTextDocument(async (x: DidOpenTextDocumentParams) => {
 
 // This handler provides the initial list of the completion items.
 connection.onCompletion(async (position: TextDocumentPositionParams) => {
-	return await server?.completion(position);
+	const out = await server?.completion(position);
+  return out;
 });
 
 connection.onPrepareRename(async (x: PrepareRenameParams) => {

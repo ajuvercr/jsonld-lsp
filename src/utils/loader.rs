@@ -11,7 +11,7 @@ use rdf_types::{vocabulary::Index, IriVocabulary, IriVocabularyMut};
 use reqwest::StatusCode;
 use std::{collections::HashMap, fmt, hash::Hash, str::FromStr, string::FromUtf8Error};
 
-use super::{fetch::fetch};
+use super::fetch::fetch;
 
 /// Loader options.
 pub struct Options<I> {
@@ -80,14 +80,11 @@ pub struct ReqwestLoader<
     parser: Box<DynParser<I, M, T, E>>,
     options: Options<I>,
     data: OnceCell<Data>,
-
-    cache: HashMap<I, Bytes>,
 }
 
 impl<I: AsRef<str>, M, T, E> std::fmt::Debug for ReqwestLoader<I, M, T, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let cached: Vec<_> = self.cache.keys().map(|x| x.as_ref()).collect();
-        write!(f, "ReqwestLoader {{ cached: {:?} }}", cached)
+        write!(f, "ReqwestLoader")
     }
 }
 
@@ -114,14 +111,7 @@ impl<I, M, T, E> ReqwestLoader<I, M, T, E> {
             parser: Box::new(parser),
             options,
             data: OnceCell::new(),
-            cache: HashMap::new(),
         }
-    }
-}
-
-impl<I: Eq + Hash, T, M, E> ReqwestLoader<I, M, T, E> {
-    pub fn set_document(&mut self, i: I, b: impl Into<Bytes>) {
-        self.cache.insert(i, b.into());
     }
 }
 
@@ -175,16 +165,10 @@ impl<I: Clone, M> ReqwestLoader<I, M, json_ld_syntax::Value<M>, ParseError<M>> {
     }
 }
 
-impl<I: Clone> Default
-    for ReqwestLoader<
-        I,
-        locspan::Location<I>,
-        json_ld_syntax::Value<locspan::Location<I>>,
-        ParseError<locspan::Location<I>>,
-    >
-{
+impl<I: Clone> Default for ReqwestLoader<I, Span, json_ld_syntax::Value<Span>, ParseError<Span>> {
     fn default() -> Self {
-        Self::new_with_metadata_map(|_, file, span| locspan::Location::new(file.clone(), span))
+        // Self::new_with_metadata_map(|_, file, span| locspan::Location::new(file.clone(), span))
+        Self::new_with_metadata_map(|_, file, span| span)
     }
 }
 
@@ -222,18 +206,18 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
         I: 'a,
     {
         async move {
-            if let Some(bytes) = self.cache.get(&url) {
-                let document =
-                    (*self.parser)(vocabulary, &url, bytes.clone()).map_err(Error::Parse)?;
-
-                let document = RemoteDocument::new(
-                    Some(url),
-                    Some(Mime::from_str("application/json+ld").unwrap()),
-                    document,
-                );
-
-                return Ok(document);
-            }
+            // if let Some(bytes) = self.cache.get(&url) {
+            //     let document =
+            //         (*self.parser)(vocabulary, &url, bytes.clone()).map_err(Error::Parse)?;
+            //
+            //     let document = RemoteDocument::new(
+            //         Some(url),
+            //         Some(Mime::from_str("application/json+ld").unwrap()),
+            //         document,
+            //     );
+            //
+            //     return Ok(document);
+            // }
 
             let data = self
                 .data
@@ -260,7 +244,8 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
 
                         let document = (*self.parser)(vocabulary, &url, bytes.clone())
                             .map_err(Error::Parse)?;
-                        self.cache.insert(url.clone(), bytes);
+
+                        // self.cache.insert(url.clone(), bytes);
 
                         let document = RemoteDocument::new_full(
                             Some(url),

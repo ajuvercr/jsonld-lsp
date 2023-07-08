@@ -59,6 +59,24 @@ lspconfig.jsonld.setup {
       codemirror components. A thin wrapper links the codemirror editor with the
       LSP. The LSP itself is compiled to WebAssembly and loaded on the page.
     </p>
+    <p>
+      Note that codemirror does not natively support LSPs, the LSP features you
+      see here are coded with a small wrapper layer, but features like semantic
+      highlighting are not supported for this reason.
+    </p>
+  </section>
+
+  <section id="screencast">
+    <h2>Screencast</h2>
+    Because of the double blind requirements I'm not able to let you integrate the
+    LSP with your local editors, this however does give the best experience. To help
+    you better understand what it looks like in a real editor, I created a screencast
+    of the LSP in VSCode.
+
+    <img
+      src="./screen.gif"
+      alt="Screencast"
+    />
   </section>
   <section id="install">
     <h2>Editor compatibility</h2>
@@ -78,12 +96,8 @@ lspconfig.jsonld.setup {
         <h2>VS Code</h2>
         <p>
           Installing the language server for VS Code is as simple as installing
-          the correct extensions. This extension is called jsonld lsp and can be
-          found on <a
-            target="_blank"
-            href="https://marketplace.visualstudio.com/items?itemName=ajuvercr.jsonld-lsp"
-            >the marketplace</a
-          >.
+          the correct extensions. This extension is called <em>redacted</em> lsp
+          and can be found on <em>redacted</em>.
         </p>
         <p>
           Creating the extension is done with special care to make it a, so

@@ -10,6 +10,9 @@ export default defineConfig({
     wasm(),
     topLevelAwait(),
     sveltekit()],
+  build: {
+    assetsInlineLimit: 4096000
+  },
   server: {
     fs: {
       allow: [

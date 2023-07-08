@@ -39,7 +39,6 @@ fn munch<T: Clone, C: Container<JsonToken>>(
 ) -> impl Parser<JsonToken, T, Error = Simple<JsonToken>> {
     let munch = none_of(c)
         .map(|x| {
-            println!("MUNCHED {}", x);
             x
         })
         .repeated()
@@ -119,9 +118,7 @@ mod tests {
     fn parse_json_array() {
         let source = "[\"test\", 42]";
         let (tokens, token_errors) = tokenize(source);
-        println!("Tokens {:?}", tokens);
         let (json, json_errors) = parse(source, tokens);
-        println!("Json {:?}", json);
 
         assert!(token_errors.is_empty());
         assert!(json_errors.is_empty());
@@ -205,13 +202,7 @@ mod tests {
 "#;
 
         let (tokens, token_errors) = tokenize(source);
-
-        println!(
-            "tokens {:?}",
-            tokens.iter().map(|x| x.value()).collect::<Vec<_>>()
-        );
-        let (json, json_errors) = parse(source, tokens);
-        println!("json {:?}", json.0);
+        let (_, json_errors) = parse(source, tokens);
 
         assert!(token_errors.is_empty());
         assert_eq!(json_errors.len(), 0);
