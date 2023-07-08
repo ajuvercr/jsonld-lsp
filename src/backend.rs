@@ -4,7 +4,6 @@ use crate::lsp_types::*;
 
 use crate::semantics::LEGEND_TYPE;
 use crate::utils::{offset_to_position, offsets_to_range, position_to_offset};
-use dashmap::DashMap;
 
 use futures::lock::Mutex;
 use ropey::Rope;

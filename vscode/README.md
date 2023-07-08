@@ -18,6 +18,8 @@ Next, the extension can be built and debugged.
 - Select `Launch Client` from the drop down.
 - Run the launch config.
 
+Run `vsce package` to build the VsCode extension.
+
 
 ### Code structure 
 
