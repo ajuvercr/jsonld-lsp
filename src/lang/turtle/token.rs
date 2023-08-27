@@ -1,6 +1,6 @@
 use enum_methods::{EnumIntoGetters, EnumIsA, EnumToGetters};
 
-#[derive(Clone, PartialEq, Debug, EnumIntoGetters, EnumIsA, EnumToGetters)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, EnumIntoGetters, EnumIsA, EnumToGetters)]
 pub enum Token {
     /// @prefix
     PrefixTag,
@@ -38,6 +38,7 @@ pub enum Token {
     False,
     /// <...>
     IRIRef(String),
+
     /// ..:
     PNameNS(Option<String>),
     PNameLN(Option<String>, String),
@@ -45,19 +46,25 @@ pub enum Token {
     BlankNodeLabel(String),
     /// @...
     LangTag(String),
-    Number(String),
 
-    /// '...'
-    StringSingleQuote(String),
-    /// "..."
-    StringDoubleQuote(String),
-    /// '''...'''
-    LongStringSingleQuote(String),
-    /// """..."""
-    LongStringDoubleQuote(String),
+    Number(String),
+    /// All string types
+    Str(String, StringStyle),
 
     /// [ ]
     ANON,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug, EnumIntoGetters, EnumIsA, EnumToGetters)]
+pub enum StringStyle {
+    /// """..."""
+    DoubleLong,
+    /// "..."
+    Double,
+    /// '''...'''
+    SingleLong,
+    /// '...'
+    Single,
 }
 
 impl std::fmt::Display for Token {
@@ -84,10 +91,7 @@ impl std::fmt::Display for Token {
             Token::BlankNodeLabel(_) => write!(f, "a blank node"),
             Token::LangTag(_) => write!(f, "a language tag"),
             Token::Number(_) => write!(f, "a number"),
-            Token::StringSingleQuote(_) => write!(f, "a string"),
-            Token::StringDoubleQuote(_) => write!(f, "a string"),
-            Token::LongStringSingleQuote(_) => write!(f, "a string"),
-            Token::LongStringDoubleQuote(_) => write!(f, "a string"),
+            Token::Str(_, _) => write!(f, "a string"),
             Token::ANON => write!(f, "an inline blank node"),
         }
     }

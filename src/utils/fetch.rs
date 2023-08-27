@@ -16,7 +16,7 @@ pub async fn fetch(url: &str, headers: &HashMap<String, String>) -> std::result:
     // hang on `send`.
     // The same happened when testing with hyper
     // Even blocking didn't work on a later version of reqwest
-    
+
     let client = reqwest::blocking::Client::new();
     let builder = client.get(url);
 

@@ -38,9 +38,7 @@ fn munch<T: Clone, C: Container<JsonToken>>(
     default: impl Fn(Range<usize>) -> T + 'static,
 ) -> impl Parser<JsonToken, T, Error = Simple<JsonToken>> {
     let munch = none_of(c)
-        .map(|x| {
-            x
-        })
+        .map(|x| x)
         .repeated()
         .map_with_span(move |_, span| default(span));
 
