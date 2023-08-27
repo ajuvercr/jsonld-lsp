@@ -8,12 +8,11 @@ pub mod backend;
 pub mod contexts;
 pub mod lang;
 pub mod model;
+pub mod parent;
 pub mod parser;
 pub mod semantics;
 pub mod utils;
 pub mod web;
-pub mod parent;
-
 
 #[derive(Debug, PartialEq, Clone, Hash, Eq)]
 pub struct Error {

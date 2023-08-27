@@ -133,9 +133,7 @@ pub enum Json {
     Object(Obj),
 }
 
-#[derive(
-    Clone, Debug, PartialEq, EnumIntoGetters, EnumIsA, EnumToGetters,
-)]
+#[derive(Clone, Debug, PartialEq, EnumIntoGetters, EnumIsA, EnumToGetters)]
 pub enum JsonToken {
     Invalid,
     Null,

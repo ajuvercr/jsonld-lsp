@@ -1,11 +1,74 @@
 use chumsky::{prelude::*, text::Character};
 
-use crate::{
-    model::{spanned, Spanned},
-    Error,
-};
+use crate::{model::spanned, Error};
 
-use super::{Base, BlankNode, Literal, NamedNode, Prefix, Subject, Term, Triple, Turtle, PO};
+#[derive(Clone)]
+enum LiteralHelper {
+    LangTag(String),
+    DataType(NamedNode),
+    None,
+}
+impl LiteralHelper {
+    fn to_lit(self, (value, quote_style): (String, StringStyle)) -> RDFLiteral {
+        match self {
+            LiteralHelper::LangTag(lang) => RDFLiteral { value , quote_style, lang: Some(lang), ty: None },
+            LiteralHelper::DataType(dt) => RDFLiteral { value , quote_style, lang: None, ty: Some(dt) },
+            LiteralHelper::None => RDFLiteral { value , quote_style, lang: None, ty: None },
+        }
+    }
+}
+fn literal() -> impl Parser<Token, Literal, Error = Simple<Token>> {
+    let lt = select! { Token::LangTag(x) => LiteralHelper::LangTag(x)};
+
+    let dt = just(Token::DataTypeDelim)
+        .ignore_then(named_node().or(empty().to(NamedNode::Invalid)))
+        .map(|x| LiteralHelper::DataType(x));
+
+    let rdf = select! {
+        Token::Str(x, style) => (x, style)
+    }
+    .then(lt.or(dt).or(empty().to(LiteralHelper::None)))
+    .map(|(x, h)| h.to_lit(x));
+
+    rdf.map(|x| Literal::RDF(x)).or(select! {
+        Token::Number(x) => Literal::Numeric(x),
+        Token::True => Literal::Boolean(true),
+        Token::False => Literal::Boolean(false),
+    })
+}
+
+fn named_node() -> impl Parser<Token, NamedNode, Error = Simple<Token>> {
+    select! {
+        Token::PredType => NamedNode::A,
+        Token::IRIRef(x) => NamedNode::Full(x),
+        Token::PNameNS(x) => NamedNode::Prefixed { prefix: x.unwrap_or_default() , value: String::new() },
+        Token::PNameLN(x, b) => NamedNode::Prefixed { prefix: x.unwrap_or_default(), value: b },
+    }
+}
+
+fn blank_node() -> impl Parser<Token, BlankNode, Error = Simple<Token>> {
+    select! {
+        Token::BlankNodeLabel(x) => BlankNode::Named(x),
+    }
+}
+
+fn subject() -> impl Parser<Token, Subject, Error = Simple<Token>> {
+    named_node()
+        .map(|x| Subject::NamedNode(x))
+        .or(blank_node().map(|x| Subject::BlankNode(x)))
+}
+
+fn term() -> impl Parser<Token, Term, Error = Simple<Token>> {
+    named_node()
+        .map(|x| Term::NamedNode(x))
+        .or(blank_node().map(|x| Term::BlankNode(x)))
+        .or(literal().map(|x| Term::Literal(x)))
+}
+
+use super::{
+    token::{StringStyle, Token},
+    Base, BlankNode, Literal, NamedNode, Prefix, Subject, Term, Triple, Turtle, PO, RDFLiteral,
+};
 
 fn escape() -> impl Parser<char, char, Error = Simple<char>> {
     just('\\').ignore_then(
@@ -55,9 +118,9 @@ fn parse_namednode() -> impl Parser<char, NamedNode, Error = Simple<char>> {
             let c = *c as char;
             c.is_ascii_alphanumeric() || c == '_' || c == '-'
         })
-            .or(escape())
-            .repeated()
-            .collect::<String>()
+        .or(escape())
+        .repeated()
+        .collect::<String>()
     };
 
     let prefixed = simple_string()
@@ -73,29 +136,30 @@ fn parse_namednode() -> impl Parser<char, NamedNode, Error = Simple<char>> {
 }
 
 fn parse_literal() -> impl Parser<char, Literal, Error = Simple<char>> {
-    let string = just('"')
-        .ignore_then(filter(|c| *c != '\\' && *c != '"').or(escape()).repeated())
-        .then_ignore(just('"'))
-        .collect::<String>()
-        .labelled("string");
+    // let string = just('"')
+    //     .ignore_then(filter(|c| *c != '\\' && *c != '"').or(escape()).repeated())
+    //     .then_ignore(just('"'))
+    //     .collect::<String>()
+    //     .labelled("string");
+    //
+    // let lang_string = just('@')
+    //     .ignore_then(filter(|c| !(*c as char).is_whitespace()).repeated())
+    //     .collect::<String>()
+    //     .labelled("lang_string");
+    // let ty_string = just('^')
+    //     .then(just('^'))
+    //     .ignore_then(parse_namednode())
+    //     .labelled("type string");
 
-    let lang_string = just('@')
-        .ignore_then(filter(|c| !(*c as char).is_whitespace()).repeated())
-        .collect::<String>()
-        .labelled("lang_string");
-    let ty_string = just('^')
-        .then(just('^'))
-        .ignore_then(parse_namednode())
-        .labelled("type string");
-
-    string
-        .then(lang_string.or_not())
-        .then(ty_string.or_not())
-        .map(|((s, l), ty)| Literal {
-            value: s,
-            lang: l,
-            ty,
-        })
+    // string
+    //     .then(lang_string.or_not())
+    //     .then(ty_string.or_not())
+    //     .map(|((s, l), ty)| Literal {
+    //         value: s,
+    //         lang: l,
+    //         ty,
+    //     })
+    todo()
 }
 
 fn parse_blanknode<P: Parser<char, PO, Error = Simple<char>>>(

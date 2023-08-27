@@ -5,7 +5,7 @@ use chumsky::prelude::*;
 use chumsky::Parser;
 use tower_lsp::lsp_types::SemanticTokenType;
 
-use super::token::Token;
+use super::token::{StringStyle, Token};
 
 pub const TOKEN_TYPES: &[SemanticTokenType] = &[
     SemanticTokenType::FUNCTION,
@@ -212,18 +212,18 @@ fn strings() -> t!(Token) {
 }
 
 fn string_single() -> t!(Token) {
-    parse_string::<'\''>().map(|x| Token::StringSingleQuote(x))
+    parse_string::<'\''>().map(|x| Token::Str(x, StringStyle::Single))
 }
 fn string_double() -> t!(Token) {
-    parse_string::<'"'>().map(|x| Token::StringDoubleQuote(x))
+    parse_string::<'"'>().map(|x| Token::Str(x, StringStyle::Double))
 }
 
 fn long_string_single() -> t!(Token) {
-    parse_long_string::<'\''>().map(|x| Token::LongStringSingleQuote(x))
+    parse_long_string::<'\''>().map(|x| Token::Str(x, StringStyle::SingleLong))
 }
 
 fn long_string_double() -> t!(Token) {
-    parse_long_string::<'"'>().map(|x| Token::LongStringDoubleQuote(x))
+    parse_long_string::<'"'>().map(|x| Token::Str(x, StringStyle::DoubleLong))
 }
 
 fn uchar() -> t!(Vec<char>) {
