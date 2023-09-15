@@ -55,6 +55,12 @@ pub enum Token {
     ANON,
 }
 
+impl crate::lang::Token for Token {
+    fn token(&self) -> Option<lsp_types::SemanticTokenType> {
+        None
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug, EnumIntoGetters, EnumIsA, EnumToGetters)]
 pub enum StringStyle {
     /// """..."""

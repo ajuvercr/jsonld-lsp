@@ -167,8 +167,7 @@ impl<I: Clone, M> ReqwestLoader<I, M, json_ld_syntax::Value<M>, ParseError<M>> {
 
 impl<I: Clone> Default for ReqwestLoader<I, Span, json_ld_syntax::Value<Span>, ParseError<Span>> {
     fn default() -> Self {
-        // Self::new_with_metadata_map(|_, file, span| locspan::Location::new(file.clone(), span))
-        Self::new_with_metadata_map(|_, file, span| span)
+        Self::new_with_metadata_map(|_, _file, span| span)
     }
 }
 

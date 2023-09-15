@@ -1,9 +1,6 @@
-use chumsky::{prelude::*, text::Character};
+use chumsky::prelude::*;
 
-use crate::{
-    model::{spanned, Spanned},
-    Error,
-};
+use crate::model::{spanned, Spanned};
 
 #[derive(Clone)]
 enum LiteralHelper {
@@ -136,13 +133,14 @@ fn prefix() -> impl Parser<Token, Prefix, Error = Simple<Token>> {
         .map(|(prefix, value)| Prefix { prefix, value })
 }
 
+// Makes it easier to handle parts that are not ordered
 enum Statement {
     Base(Spanned<Base>),
     Prefix(Spanned<Prefix>),
     Triple(Spanned<Triple>),
 }
 
-fn turtle() -> impl Parser<Token, Turtle, Error = Simple<Token>> {
+pub fn turtle() -> impl Parser<Token, Turtle, Error = Simple<Token>> {
     let base = base().map_with_span(spanned).map(|b| Statement::Base(b));
     let prefix = prefix()
         .map_with_span(spanned)

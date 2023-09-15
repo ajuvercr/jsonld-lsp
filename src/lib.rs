@@ -1,9 +1,5 @@
 use std::ops::Range;
 
-use dashmap::DashMap;
-use model::ParentingSystem;
-use ropey::Rope;
-
 pub mod backend;
 pub mod contexts;
 pub mod lang;
@@ -19,8 +15,6 @@ pub struct Error {
     pub msg: String,
     pub span: Range<usize>,
 }
-
-pub type Documents = DashMap<String, (ParentingSystem, Rope)>;
 
 #[cfg(feature = "bin")]
 pub use tower_lsp::lsp_types;
