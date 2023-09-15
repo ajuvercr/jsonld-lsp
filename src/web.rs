@@ -1,4 +1,4 @@
-use crate::{backend::Client, lsp_types::*, utils::web_types as wt};
+use crate::{backend::Client, lsp_types::*, utils::web_types as wt, lang::jsonld::JsonLd};
 use serde::Serializer;
 use serde_json::json;
 use tower_lsp::LanguageServer;
@@ -157,7 +157,7 @@ macro_rules! gen2 {
 
 #[wasm_bindgen]
 pub struct WebBackend {
-    inner: Backend<WebClient>,
+    inner: Backend<WebClient, JsonLd>,
 }
 
 #[wasm_bindgen]
@@ -165,7 +165,7 @@ impl WebBackend {
     #[wasm_bindgen(constructor)]
     pub fn new(client: WebClient) -> Self {
         Self {
-            inner: Backend::new(client),
+            inner: Backend::new(client, Default::default()),
         }
     }
 }

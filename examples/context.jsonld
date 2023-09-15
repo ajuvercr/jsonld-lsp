@@ -1,7 +1,8 @@
 {
   "@context": {
-    "name": "http://someName",
-    "knows": "http://knows",
-    "tetten": "http://knows"
-  }
+    "name": "http://xmlns.com/foaf/0.1/name",
+    "knows": "http://xmlns.com/foaf/0.1/knows"
+  },
+  "@id": "Something cool!"
 }
+

@@ -67,18 +67,24 @@ pub trait Node<T> {
 }
 
 pub trait Lang {
+    type State: Clone;
+
     /// Type of tokens after tokenization
-    type Token: PartialEq + Hash + Token + Clone;
-    type TokenError;
+    type Token: PartialEq + Hash + Token + Clone + Send + Sync;
+    type TokenError: Into<SimpleDiagnostic> + Send + Sync;
 
     /// Type of Element inside a ParentingSystem
-    type Element;
-    type ElementError;
+    type Element: Send + Sync;
+    type ElementError: Into<SimpleDiagnostic> + Send + Sync;
 
-    type RenameError;
-    type PrepareRenameError;
+    type RenameError: Send + Sync;
+    type PrepareRenameError: Send + Sync;
 
-    type Node: Node<Self::Token>;
+    type Node: Node<Self::Token> + Send + Sync;
+
+    const LANG: &'static str;
+    const TRIGGERS: &'static [&'static str];
+    const LEGEND_TYPES: &'static [SemanticTokenType];
 
     fn tokenize(&mut self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>);
     fn parse(
@@ -104,17 +110,14 @@ pub trait Lang {
         pos: usize,
         new_name: String,
     ) -> Result<Vec<(std::ops::Range<usize>, String)>, Self::RenameError>;
+
+    fn new(id: String, state: Self::State) -> Self;
 }
 
 #[async_trait::async_trait]
 pub trait LangState: Lang
 where
     Self: Sized,
-    Spanned<<Self as Lang>::Element>: Send,
-    Spanned<<Self as Lang>::Node>: Send,
-    Spanned<<Self as Lang>::Token>: Send,
-    <Self as Lang>::TokenError: Into<SimpleDiagnostic> + Send,
-    <Self as Lang>::ElementError: Into<SimpleDiagnostic> + Send,
 {
     async fn update(&mut self, parents: ParentingSystem<Spanned<Self::Node>>);
 

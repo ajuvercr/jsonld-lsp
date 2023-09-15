@@ -66,6 +66,11 @@ name = "jsonld-language-server"
 path = "bin/jsonld.rs"
 required-features = ["bin"]
 
+[[bin]]
+name = "turtle-language-server"
+path = "bin/ttl.rs"
+required-features = ["bin"]
+
 [profile.release]
 debug = true
 

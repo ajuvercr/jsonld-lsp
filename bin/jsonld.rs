@@ -1,4 +1,6 @@
 use jsonld_language_server::backend::Backend;
+use jsonld_language_server::lang::jsonld::JsonLd;
+use log::LevelFilter;
 use std::fs::File;
 use tower_lsp::LspService;
 use tower_lsp::Server;
@@ -14,9 +16,12 @@ async fn main() {
         .target(target)
         .init();
 
+    log::set_max_level(LevelFilter::Trace);
+
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::build(|client| Backend::new(client)).finish();
+    let (service, socket) =
+        LspService::build(|client| Backend::<_, JsonLd>::new(client, Default::default())).finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 }

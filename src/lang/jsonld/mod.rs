@@ -86,7 +86,7 @@ impl fmt::Debug for JsonLd {
 }
 
 impl JsonLd {
-    pub fn new(id: String, cache: Cache) -> Self {
+    fn new(id: String, cache: Cache) -> Self {
         let parents = parent::system(Spanned(Json::Token(JsonToken::Null), 0..0));
 
         Self {
@@ -108,6 +108,8 @@ impl Node<JsonToken> for JsonNode {
 }
 
 impl Lang for JsonLd {
+    type State = Cache;
+
     type Token = JsonToken;
 
     type TokenError = Simple<char>;
@@ -121,6 +123,18 @@ impl Lang for JsonLd {
     type PrepareRenameError = ();
 
     type Node = JsonNode;
+
+    const LANG: &'static str = "jsonld";
+
+    const TRIGGERS: &'static [&'static str] = &["@", "\""];
+    const LEGEND_TYPES: &'static [SemanticTokenType] = &[
+        SemanticTokenType::VARIABLE,
+        SemanticTokenType::STRING,
+        SemanticTokenType::NUMBER,
+        SemanticTokenType::KEYWORD,
+        SemanticTokenType::PROPERTY,
+        SemanticTokenType::ENUM_MEMBER,
+    ];
 
     fn tokenize(&mut self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>) {
         self.rope = Rope::from(source.to_owned());
@@ -144,6 +158,7 @@ impl Lang for JsonLd {
         system: &ParentingSystem<Spanned<Self::Node>>,
         mut apply: impl FnMut(Range<usize>, lsp_types::SemanticTokenType) -> (),
     ) {
+        log::error!("Semantic tokens functions is called!");
         system
             .iter()
             .flat_map(|(_, x)| x.as_kv())
@@ -158,8 +173,13 @@ impl Lang for JsonLd {
             .iter()
             .filter(|(_, x)| x.is_kv())
             .map(|(_, x)| x.to_kv())
-            .filter(|(ref x, _)| x.value().starts_with("@"))
-            .for_each(|(x, _)| apply(x.span().clone(), SemanticTokenType::KEYWORD));
+            .for_each(|(x, _)| {
+                if x.value().starts_with("@") {
+                    apply(x.span().clone(), SemanticTokenType::KEYWORD);
+                } else {
+                    apply(x.span().clone(), SemanticTokenType::PROPERTY);
+                }
+            });
     }
 
     fn prepare_rename(
@@ -200,6 +220,10 @@ impl Lang for JsonLd {
             .map(|(range, _)| (range, new_name.clone()))
             .collect())
     }
+
+    fn new(id: String, cache: Cache) -> Self {
+        Self::new(id, cache)
+    }
 }
 
 #[async_trait::async_trait]
@@ -217,10 +241,12 @@ impl LangState for JsonLd {
     }
 
     async fn do_semantic_tokens(&mut self) -> Vec<SemanticToken> {
+        log::error!("Semantic tokens functions is called!");
         semantic_tokens(self, &self.parents, &self.rope)
     }
 
     async fn do_completion(&mut self, trigger: Option<String>) -> Vec<super::SimpleCompletion> {
+        log::error!("Completion functions is called!");
         if trigger == Some("@".to_string()) {
             self.get_ids()
                 .into_iter()
