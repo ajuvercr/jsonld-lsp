@@ -12,8 +12,8 @@ use lsp_types::{CompletionItemKind, SemanticToken, SemanticTokenType};
 use ropey::Rope;
 
 use crate::{
-    contexts::filter_definition, model::Spanned, parent::ParentingSystem,
-    semantics::semantic_tokens, utils::ReqwestLoader, web,
+    model::Spanned, parent::ParentingSystem,
+    semantics::semantic_tokens, utils::ReqwestLoader, contexts::filter_definition,
 };
 
 use self::{
@@ -30,8 +30,6 @@ pub mod tokenizer;
 
 type Parents = ParentingSystem<Spanned<<JsonLd as Lang>::Node>>;
 pub type Cache = Arc<Mutex<HashMap<String, Value<Span>>>>;
-// pub type Loader = Arc<Mutex<ReqwestLoader<IriBuf>>>;
-//
 
 async fn load_ctx(cache: &Cache, id: &str) -> Value<Span> {
     {

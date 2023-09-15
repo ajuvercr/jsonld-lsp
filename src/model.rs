@@ -1,11 +1,9 @@
 use std::{
     borrow::Borrow,
-    ops::{Deref, Index, IndexMut, Range},
+    ops::{Deref, Range},
 };
 
 use enum_methods::{EnumIntoGetters, EnumIsA, EnumToGetters};
-use json_ld::syntax;
-use locspan::{Meta, Span};
 
 #[derive(Debug, Clone)]
 pub struct Spanned<T>(pub T, pub Range<usize>);
@@ -156,151 +154,6 @@ impl JsonToken {
             JsonToken::Num(_) => "num",
             JsonToken::Array(_) => "array",
             JsonToken::Obj(_) => "obj",
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ParentingSystem {
-    objects: Vec<Spanned<JsonToken>>,
-    parents: Vec<usize>,
-}
-
-impl Index<usize> for ParentingSystem {
-    type Output = Spanned<JsonToken>;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.objects[index]
-    }
-}
-impl IndexMut<usize> for ParentingSystem {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.objects[index]
-    }
-}
-
-fn range_to_span(range: &Range<usize>) -> Span {
-    Span::new(range.start, range.end)
-}
-
-impl ParentingSystem {
-    pub fn jsonld_value(&self, obj: usize) -> Option<Meta<syntax::Value<Span>, Span>> {
-        type V = syntax::Value<Span>;
-        let Spanned(ref t, ref range) = self[obj];
-        let span = Span::new(range.start, range.end);
-
-        let v = match t {
-            JsonToken::Invalid => return None,
-            JsonToken::KV(_, _) => return None,
-            JsonToken::Null => V::Null,
-            JsonToken::Bool(x) => V::Boolean(*x),
-            JsonToken::Str(x) => V::from(x.as_str()),
-            JsonToken::Num(x) => syntax::Value::try_from(*x).ok()?,
-            JsonToken::Array(arr) => {
-                V::Array(arr.iter().flat_map(|id| self.jsonld_value(*id)).collect())
-            }
-            JsonToken::Obj(arr) => {
-                let mut object = syntax::Object::new();
-                arr.iter()
-                    .flat_map(|&id| {
-                        let (k, v) = self[id].as_kv()?;
-                        let key = Meta(k.value().as_str().into(), range_to_span(k.span()));
-
-                        let value = self.jsonld_value(v)?;
-
-                        Some(syntax::object::Entry { key, value })
-                    })
-                    .for_each(|x| {
-                        object.push_entry(x);
-                    });
-
-                V::Object(object)
-            }
-        };
-
-        Some(Meta(v, span))
-    }
-
-    fn add(&mut self, json: Spanned<Json>, parent: usize) -> usize {
-        let out = self.parents.len();
-
-        self.parents.push(parent);
-
-        match json.0 {
-            Json::Invalid => self.objects.push(json.map(|_| JsonToken::Invalid)),
-            Json::Null => self.objects.push(json.map(|_| JsonToken::Null)),
-            Json::Bool(x) => self.objects.push(json.map(|_| JsonToken::Bool(x))),
-            Json::Str(x) => self.objects.push(Spanned(JsonToken::Str(x), json.1)),
-            Json::Num(x) => self.objects.push(json.map(|_| JsonToken::Num(x))),
-            Json::Array(ar) => {
-                self.objects.push(Spanned(JsonToken::Invalid, 0..0));
-                let children = ar.into_iter().map(|x| self.add(x, out)).collect();
-                self.objects[out] = Spanned(JsonToken::Array(children), json.1);
-            }
-            Json::Object(obj) => {
-                self.objects.push(Spanned(JsonToken::Invalid, 0..0));
-                let children: Vec<_> = obj
-                    .0
-                    .into_iter()
-                    .map(|Spanned(m, span)| {
-                        let kv_idx = self.parents.len();
-                        self.parents.push(out);
-                        if let Some((k, v)) = m {
-                            self.objects.push(Spanned(JsonToken::Invalid, 0..0));
-
-                            let v = self.add(v, kv_idx);
-                            self.objects[kv_idx] = Spanned(JsonToken::KV(k, v), span);
-                        } else {
-                            self.objects.push(Spanned(JsonToken::Invalid, span));
-                        }
-
-                        kv_idx
-                    })
-                    .collect();
-                self.objects[out] = Spanned(JsonToken::Obj(children), json.1);
-            }
-        }
-
-        out
-    }
-    pub fn from_json(json: Spanned<Json>) -> Self {
-        let mut this = Self {
-            objects: Vec::new(),
-            parents: Vec::new(),
-        };
-        this.add(json, 0);
-        this
-    }
-
-    pub fn parent(&self, idx: usize) -> Option<(usize, &Spanned<JsonToken>)> {
-        if idx == 0 {
-            None
-        } else {
-            let ids = self.parents[idx];
-            Some((ids, &self.objects[ids]))
-        }
-    }
-    pub fn parent_iter<'a>(&'a self, idx: usize) -> ParentIter<'a> {
-        ParentIter { parents: self, idx }
-    }
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = (usize, &'a Spanned<JsonToken>)> {
-        self.objects.iter().enumerate()
-    }
-}
-
-pub struct ParentIter<'a> {
-    parents: &'a ParentingSystem,
-    idx: usize,
-}
-impl<'a> Iterator for ParentIter<'a> {
-    type Item = (usize, &'a Spanned<JsonToken>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some((idx, o)) = self.parents.parent(self.idx) {
-            self.idx = idx;
-            Some((idx, o))
-        } else {
-            None
         }
     }
 }

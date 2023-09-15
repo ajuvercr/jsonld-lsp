@@ -66,6 +66,12 @@ pub trait Node<T> {
     fn leaf<'a>(&'a self) -> Option<&'a T>;
 }
 
+impl<T> Node<T> for () {
+    fn leaf<'a>(&'a self) -> Option<&'a T> {
+        None
+    }
+}
+
 pub trait Lang {
     type State: Clone;
 

@@ -33,18 +33,6 @@ pub fn parse(
     )
 }
 
-fn munch<T: Clone, C: Container<JsonToken>>(
-    c: C,
-    default: impl Fn(Range<usize>) -> T + 'static,
-) -> impl Parser<JsonToken, T, Error = Simple<JsonToken>> {
-    let munch = none_of(c)
-        .map(|x| x)
-        .repeated()
-        .map_with_span(move |_, span| default(span));
-
-    munch
-}
-
 fn parser() -> impl Parser<JsonToken, Spanned<Json>, Error = Simple<JsonToken>> {
     use JsonToken::*;
 
