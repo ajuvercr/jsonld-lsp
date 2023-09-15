@@ -35,11 +35,17 @@ pub struct RDFLiteral {
 }
 impl Display for RDFLiteral {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let quote = match self.quote_style {
+            StringStyle::DoubleLong => "\"\"\"",
+            StringStyle::Double => "\"",
+            StringStyle::SingleLong => "'''",
+            StringStyle::Single => "'",
+        };
         match (&self.lang, &self.ty) {
-            (None, None) => write!(f, "\"{}\"", self.value),
-            (None, Some(t)) => write!(f, "\"{}\"^^{}", self.value, t),
-            (Some(l), None) => write!(f, "\"{}\"@{}", self.value, l),
-            (Some(l), Some(t)) => write!(f, "\"{}\"@{}^^{}", self.value, l, t),
+            (None, None) => write!(f, "{}{}{}", quote, self.value, quote),
+            (None, Some(t)) => write!(f, "{}{}{}^^{}", quote, self.value, quote, t),
+            (Some(l), None) => write!(f, "{}{}{}@{}", quote, self.value, quote, l),
+            (Some(l), Some(t)) => write!(f, "{}{}{}@{}^^{}", quote, self.value, quote, l, t),
         }
     }
 }
@@ -74,13 +80,17 @@ impl Display for BlankNode {
         match self {
             BlankNode::Named(x) => write!(f, "_:{}", x),
             BlankNode::Unnamed(pos) => {
-                write!(f, "[ ")?;
+                if pos.len() == 0 {
+                    write!(f, "[ ]")
+                } else {
+                    write!(f, "[ ")?;
 
-                for po in &pos[1..] {
-                    write!(f, "{} ;", po.value())?;
+                    for po in pos {
+                        write!(f, "{} ;", po.value())?;
+                    }
+
+                    write!(f, " ]")
                 }
-
-                write!(f, " ]")
             }
             BlankNode::Invalid => write!(f, "invalid"),
         }
@@ -185,6 +195,7 @@ pub struct Turtle {
     pub prefixes: Vec<Spanned<Prefix>>,
     pub triples: Vec<Spanned<Triple>>,
 }
+
 impl Display for Turtle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(b) = &self.base {

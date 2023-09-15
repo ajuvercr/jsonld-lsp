@@ -1,8 +1,6 @@
-use crate::lang::jsonld::{Cache, JsonLd};
 use crate::lang::{Lang, LangState, SimpleCompletion};
 use crate::lsp_types::*;
 
-use crate::semantics::LEGEND_TYPE;
 use crate::utils::{offset_to_position, offsets_to_range, position_to_offset};
 
 use futures::lock::Mutex;
@@ -42,17 +40,27 @@ impl Client for tower_lsp::Client {
 }
 
 #[derive(Debug)]
-pub struct Backend<C: Client> {
+pub struct Backend<C: Client, L: LangState> {
     pub client: C,
 
-    cache: Cache,
-    langs: Arc<Mutex<HashMap<String, JsonLd>>>,
+    cache: L::State,
+    langs: Arc<Mutex<HashMap<String, L>>>,
     ropes: Mutex<HashMap<String, Rope>>,
 }
 
 #[tower_lsp::async_trait]
-impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
+impl<C: Client + Send + Sync + 'static, L: LangState + Send + Sync + 'static> LanguageServer
+    for Backend<C, L>
+where
+    <L as Lang>::State: Send + Sync + 'static,
+    <L as Lang>::Token: Send + Sync + 'static,
+    <L as Lang>::TokenError: Send + Sync + 'static,
+    <L as Lang>::Node: Send + Sync + 'static,
+    <L as Lang>::Element: Send + Sync + 'static,
+    <L as Lang>::ElementError: Send + Sync + 'static,
+{
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+        let triggers = L::TRIGGERS.iter().copied().map(String::from).collect();
         Ok(InitializeResult {
             server_info: None,
             capabilities: ServerCapabilities {
@@ -61,7 +69,7 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
                 )),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
-                    trigger_characters: Some(vec!["@".to_string(), "\"".to_string()]),
+                    trigger_characters: Some(triggers),
                     work_done_progress_options: Default::default(),
                     all_commit_characters: None,
                     completion_item: None,
@@ -72,7 +80,7 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
                             text_document_registration_options: {
                                 TextDocumentRegistrationOptions {
                                     document_selector: Some(vec![DocumentFilter {
-                                        language: Some("jsonld".to_string()),
+                                        language: Some(L::LANG.to_string()),
                                         scheme: Some("file".to_string()),
                                         pattern: None,
                                     }]),
@@ -81,7 +89,7 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
                             semantic_tokens_options: SemanticTokensOptions {
                                 work_done_progress_options: WorkDoneProgressOptions::default(),
                                 legend: SemanticTokensLegend {
-                                    token_types: LEGEND_TYPE.clone().into(),
+                                    token_types: L::LEGEND_TYPES.clone().into(),
                                     token_modifiers: vec![],
                                 },
                                 range: Some(false),
@@ -236,7 +244,7 @@ impl<C: Client + Send + Sync + 'static> LanguageServer for Backend<C> {
         let mut langs = self.langs.lock().await;
 
         if !langs.contains_key(&id) {
-            let lang = JsonLd::new(id.clone(), self.cache.clone());
+            let lang = L::new(id.clone(), self.cache.clone());
             langs.insert(id.clone(), lang);
         }
         let lang = langs.get_mut(&id).unwrap();
@@ -307,12 +315,12 @@ struct TextDocumentItem {
     version: i32,
 }
 
-impl<C: Client> Backend<C> {
-    pub fn new(client: C) -> Self {
+impl<C: Client, L: LangState + Send + Sync> Backend<C, L> {
+    pub fn new(client: C, cache: L::State) -> Self {
         Backend {
+            cache,
             client,
             langs: Default::default(),
-            cache: Default::default(),
             ropes: Default::default(),
         }
     }
@@ -323,7 +331,7 @@ impl<C: Client> Backend<C> {
         let mut langs = self.langs.lock().await;
 
         if !langs.contains_key(&id) {
-            let lang = JsonLd::new(id.clone(), self.cache.clone());
+            let lang = L::new(id.clone(), self.cache.clone());
             langs.insert(id.clone(), lang);
         }
 

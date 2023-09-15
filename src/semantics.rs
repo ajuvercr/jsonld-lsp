@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{
     lang::{Lang, Node, Token},
     lsp_types::{SemanticToken, SemanticTokenType},
@@ -7,15 +5,6 @@ use crate::{
     parent::ParentingSystem,
 };
 use ropey::Rope;
-
-pub const LEGEND_TYPE: &[SemanticTokenType] = &[
-    SemanticTokenType::VARIABLE,
-    SemanticTokenType::STRING,
-    SemanticTokenType::NUMBER,
-    SemanticTokenType::KEYWORD,
-    SemanticTokenType::PROPERTY,
-    SemanticTokenType::ENUM_MEMBER,
-];
 
 struct T {
     start: usize,
@@ -28,31 +17,55 @@ pub fn semantic_tokens<L: Lang>(
     system: &ParentingSystem<Spanned<L::Node>>,
     rope: &Rope,
 ) -> Vec<SemanticToken> {
-    let mut tokens: HashMap<_, _> = system
+    let mut tokens: Vec<Option<SemanticTokenType>> = Vec::with_capacity(rope.len_chars());
+    tokens.resize(rope.len_chars(), None);
+
+    lang.semantic_tokens(system, |token, ty| {
+        token.for_each(|i| tokens[i] = Some(ty.clone()));
+    });
+
+    system
         .iter()
         .flat_map(|(_, x)| x.leaf().map(|t| spanned(t, x.span().clone())))
         .flat_map(|s| s.value().token().map(|t| (s.span().clone(), t)))
-        .collect();
+        .for_each(|(range, ty)| {
+            if range.clone().all(|i| tokens[i].is_none()) {
+                range.for_each(|i| tokens[i] = Some(ty.clone()));
+            }
+        });
 
-    lang.semantic_tokens(system, |token, ty| {
-        tokens.insert(token, ty);
-    });
+    let mut last = None;
+    let mut start = 0;
+    let mut out_tokens = Vec::new();
+    for (i, ty) in tokens.into_iter().enumerate() {
+        if last != ty {
+            if let Some(t) = last {
+                log::error!("sem tokens {} - {} {:?}", start, i, t);
+                out_tokens.push(T {
+                    start,
+                    length: i - start,
+                    ty: L::LEGEND_TYPES.iter().position(|x| x == &t).unwrap_or(0),
+                });
+            }
 
-    let mut tokens: Vec<_> = tokens
-        .into_iter()
-        .map(|(k, v)| T {
-            start: k.start,
-            length: k.end - k.start,
-            ty: LEGEND_TYPE.iter().position(|x| x == &v).unwrap_or(0),
-        })
-        .collect();
+            last = ty;
+            start = i;
+        }
+    }
 
-    tokens.sort_by(|a, b| a.start.cmp(&b.start));
+    if let Some(t) = last {
+        log::error!("sem tokens {} - end {:?}", start, t);
+        out_tokens.push(T {
+            start,
+            length: rope.len_chars() - start,
+            ty: L::LEGEND_TYPES.iter().position(|x| x == &t).unwrap_or(0),
+        });
+    }
 
     let mut pre_line = 0;
     let mut pre_start = 0;
 
-    tokens
+    out_tokens
         .into_iter()
         .flat_map(|token| {
             let line = rope.try_byte_to_line(token.start as usize).ok()? as u32;
