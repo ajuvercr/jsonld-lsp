@@ -1,6 +1,6 @@
 use super::token::StringStyle;
 use crate::model::Spanned;
-use std::fmt::Display;
+use std::{fmt::Display, ops::Range};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Literal {
@@ -25,6 +25,7 @@ pub struct RDFLiteral {
     pub lang: Option<String>,
     pub ty: Option<NamedNode>,
 }
+
 impl Display for RDFLiteral {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let quote = match self.quote_style {
@@ -49,6 +50,7 @@ pub enum NamedNode {
     A,
     Invalid,
 }
+
 impl Display for NamedNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -146,6 +148,7 @@ pub struct PO {
     pub predicate: Spanned<NamedNode>,
     pub object: Vec<Spanned<Term>>,
 }
+
 impl Display for PO {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} {}", self.predicate.value(), self.object[0].value())?;
@@ -159,14 +162,15 @@ impl Display for PO {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Base(pub Spanned<NamedNode>);
+pub struct Base(pub Range<usize>, pub Spanned<NamedNode>);
 impl Display for Base {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "@base {} .", self.0.value())
+        write!(f, "@base {} .", self.1.value())
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Prefix {
+    pub span: Range<usize>,
     pub prefix: Spanned<String>,
     pub value: Spanned<NamedNode>,
 }

@@ -12,8 +12,8 @@ use lsp_types::{CompletionItemKind, SemanticToken, SemanticTokenType};
 use ropey::Rope;
 
 use crate::{
-    model::Spanned, parent::ParentingSystem,
-    semantics::semantic_tokens, utils::ReqwestLoader, contexts::filter_definition,
+    contexts::filter_definition, model::Spanned, parent::ParentingSystem,
+    semantics::semantic_tokens, utils::ReqwestLoader,
 };
 
 use self::{
@@ -121,6 +121,7 @@ impl Lang for JsonLd {
     type PrepareRenameError = ();
 
     type Node = JsonNode;
+    type NodeLeaf = JsonToken;
 
     const LANG: &'static str = "jsonld";
 

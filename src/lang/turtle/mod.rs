@@ -1,23 +1,34 @@
 pub mod tokenizer;
 // pub mod parser;
 mod model;
+mod node;
 mod parser;
 mod token;
+use lsp_types::SemanticTokenType;
 use std::ops::Range;
+use token::Token;
 
-use chumsky::prelude::Simple;
+use chumsky::{prelude::Simple, primitive::end, recovery::skip_then_retry_until, Parser};
 pub use model::*;
 
 pub use parser::*;
 use ropey::Rope;
 
-use crate::{model::Spanned, parent::ParentingSystem};
+use crate::{
+    model::{spanned, Spanned},
+    parent::ParentingSystem,
+    semantics::semantic_tokens,
+};
 
-use super::Lang;
+use self::node::{Leaf, Node};
+
+use super::{Lang, LangState};
 
 pub struct TurtleLang {
     id: String,
     rope: Rope,
+    tokens: Vec<Spanned<Token>>,
+    parents: ParentingSystem<Spanned<<Self as Lang>::Node>>,
 }
 
 impl Lang for TurtleLang {
@@ -35,16 +46,39 @@ impl Lang for TurtleLang {
 
     type PrepareRenameError = ();
 
-    type Node = ();
+    type Node = Node;
+    type NodeLeaf = Leaf;
 
     const LANG: &'static str = "turtle";
 
     const TRIGGERS: &'static [&'static str] = &[];
 
-    const LEGEND_TYPES: &'static [lsp_types::SemanticTokenType] = &[];
+    const LEGEND_TYPES: &'static [lsp_types::SemanticTokenType] = &[
+        SemanticTokenType::STRING,
+        SemanticTokenType::ENUM_MEMBER,
+        SemanticTokenType::NUMBER,
+        SemanticTokenType::VARIABLE,
+        SemanticTokenType::PROPERTY,
+        SemanticTokenType::FUNCTION,
+    ];
 
     fn tokenize(&mut self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>) {
-        todo!()
+        self.rope = Rope::from(source.to_owned());
+        let parser = tokenizer::parse_tokens();
+
+        let (json, errs) = parser.parse_recovery(source);
+
+        let tokens: Vec<_> = json
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(x, y)| spanned(x, y))
+            .collect();
+
+        if errs.is_empty() {
+            self.tokens = tokens.clone();
+        }
+
+        (tokens, errs)
     }
 
     fn parse(
@@ -52,11 +86,26 @@ impl Lang for TurtleLang {
         source: &str,
         tokens: &Vec<Spanned<Self::Token>>,
     ) -> (Spanned<Self::Element>, Vec<Self::ElementError>) {
-        todo!()
+        let stream = chumsky::Stream::from_iter(
+            0..source.len() + 1,
+            tokens.clone().into_iter().map(|Spanned(x, s)| (x, s)),
+        );
+
+        let parser = turtle()
+            .map_with_span(spanned)
+            .then_ignore(end().recover_with(skip_then_retry_until([])));
+        let (json, json_errors) = parser.parse_recovery(stream);
+
+        (
+            json.unwrap_or(Spanned(Default::default(), 0..source.len())),
+            json_errors,
+        )
     }
 
     fn parents(&self, element: &Spanned<Self::Element>) -> ParentingSystem<Spanned<Self::Node>> {
-        todo!()
+        let p = ParentingSystem::new_turtle(element.clone());
+
+        p
     }
 
     fn semantic_tokens(
@@ -64,14 +113,15 @@ impl Lang for TurtleLang {
         system: &ParentingSystem<Spanned<Self::Node>>,
         apply: impl FnMut(Range<usize>, lsp_types::SemanticTokenType) -> (),
     ) {
-        todo!()
+
+        // TODO
     }
 
     fn prepare_rename(
         &self,
         pos: usize,
     ) -> Result<(Range<usize>, String), Self::PrepareRenameError> {
-        todo!()
+        Err(())
     }
 
     fn rename(
@@ -79,13 +129,30 @@ impl Lang for TurtleLang {
         pos: usize,
         new_name: String,
     ) -> Result<Vec<(Range<usize>, String)>, Self::RenameError> {
-        todo!()
+        Err(())
     }
 
     fn new(id: String, state: Self::State) -> Self {
         TurtleLang {
             id,
+            tokens: Vec::new(),
             rope: Rope::new(),
+            parents: ParentingSystem::new(),
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl LangState for TurtleLang {
+    async fn update(&mut self, parents: ParentingSystem<Spanned<<TurtleLang as Lang>::Node>>) {
+        self.parents = parents;
+    }
+
+    async fn do_semantic_tokens(&mut self) -> Vec<lsp_types::SemanticToken> {
+        semantic_tokens(self, &self.parents, &self.rope)
+    }
+
+    async fn do_completion(&mut self, trigger: Option<String>) -> Vec<super::SimpleCompletion> {
+        Vec::new()
     }
 }

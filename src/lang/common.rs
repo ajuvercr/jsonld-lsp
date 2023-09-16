@@ -76,7 +76,7 @@ pub trait Lang {
     type State: Clone;
 
     /// Type of tokens after tokenization
-    type Token: PartialEq + Hash + Token + Clone + Send + Sync;
+    type Token: PartialEq + Hash + Clone + Send + Sync;
     type TokenError: Into<SimpleDiagnostic> + Send + Sync;
 
     /// Type of Element inside a ParentingSystem
@@ -86,7 +86,8 @@ pub trait Lang {
     type RenameError: Send + Sync;
     type PrepareRenameError: Send + Sync;
 
-    type Node: Node<Self::Token> + Send + Sync;
+    type Node: Node<Self::NodeLeaf> + Send + Sync;
+    type NodeLeaf: Send + Sync + Token;
 
     const LANG: &'static str;
     const TRIGGERS: &'static [&'static str];
