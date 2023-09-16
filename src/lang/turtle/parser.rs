@@ -120,17 +120,23 @@ fn triple() -> impl Parser<Token, Triple, Error = Simple<Token>> + Clone {
 
 fn base() -> impl Parser<Token, Base, Error = Simple<Token>> + Clone {
     just(Token::BaseTag)
-        .ignore_then(named_node().map_with_span(spanned))
+        .map_with_span(|_, s| s)
+        .then(named_node().map_with_span(spanned))
         .then_ignore(just(Token::Stop))
-        .map(|x| Base(x))
+        .map(|(s, x)| Base(s, x))
 }
 
 fn prefix() -> impl Parser<Token, Prefix, Error = Simple<Token>> {
     just(Token::PrefixTag)
-        .ignore_then(select! { |span| Token::PNameNS(x) => Spanned(x.unwrap_or_default(), span)})
+        .map_with_span(|_, s| s)
+        .then(select! { |span| Token::PNameNS(x) => Spanned(x.unwrap_or_default(), span)})
         .then(named_node().map_with_span(spanned))
         .then_ignore(just(Token::Stop))
-        .map(|(prefix, value)| Prefix { prefix, value })
+        .map(|((span, prefix), value)| Prefix {
+            span,
+            prefix,
+            value,
+        })
 }
 
 // Makes it easier to handle parts that are not ordered
@@ -150,7 +156,7 @@ pub fn turtle() -> impl Parser<Token, Turtle, Error = Simple<Token>> {
         .map(|b| Statement::Triple(b));
 
     let statement = base.or(prefix).or(triple);
-    statement.repeated().then_ignore(end()).map(|statements| {
+    statement.repeated().map(|statements| {
         let mut base = None;
         let mut prefixes = Vec::new();
         let mut triples = Vec::new();

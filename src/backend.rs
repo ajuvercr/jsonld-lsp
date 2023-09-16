@@ -61,6 +61,7 @@ where
 {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         let triggers = L::TRIGGERS.iter().copied().map(String::from).collect();
+        log::error!("initialize");
         Ok(InitializeResult {
             server_info: None,
             capabilities: ServerCapabilities {
@@ -197,6 +198,7 @@ where
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
+        log::error!("semantic tokens full");
         let uri = params.text_document.uri.as_str();
         let mut langs = self.langs.lock().await;
         if let Some(lang) = langs.get_mut(uri) {
@@ -214,6 +216,7 @@ where
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        log::error!("did open");
         self.on_change(TextDocumentItem {
             uri: params.text_document.uri,
             text: params.text_document.text,
@@ -229,6 +232,7 @@ where
             content_changes,
         }: DidChangeTextDocumentParams,
     ) {
+        log::error!("did change");
         let text: String = content_changes[0].text.clone();
         self.on_change(TextDocumentItem {
             uri: text_document.uri,
@@ -239,6 +243,7 @@ where
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        log::error!("completion");
         let id = params.text_document_position.text_document.uri.to_string();
 
         let mut langs = self.langs.lock().await;
