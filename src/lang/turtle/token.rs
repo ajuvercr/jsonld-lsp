@@ -1,4 +1,10 @@
+use std::ops::Range;
+
 use enum_methods::{EnumIntoGetters, EnumIsA, EnumToGetters};
+
+use crate::{lang, model::Spanned};
+
+use super::semantic_token;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug, EnumIntoGetters, EnumIsA, EnumToGetters)]
 pub enum Token {
@@ -53,11 +59,58 @@ pub enum Token {
 
     /// [ ]
     ANON,
+    Comment(String),
 }
 
-impl crate::lang::Token for Token {
+impl lang::Token for Token {
     fn token(&self) -> Option<lsp_types::SemanticTokenType> {
-        None
+        match self {
+            Token::PrefixTag
+            | Token::BaseTag
+            | Token::SparqlPrefix
+            | Token::SparqlBase
+            | Token::PredType => Some(lsp_types::SemanticTokenType::KEYWORD),
+            Token::True | Token::False => Some(semantic_token::BOOLEAN),
+            Token::IRIRef(_) => Some(lsp_types::SemanticTokenType::PROPERTY),
+            Token::LangTag(_) => Some(semantic_token::LANG_TAG),
+            Token::Number(_) => Some(lsp_types::SemanticTokenType::NUMBER),
+            Token::Str(_, _) => Some(lsp_types::SemanticTokenType::STRING),
+            Token::PNameNS(_) => Some(lsp_types::SemanticTokenType::NAMESPACE),
+            _ => None,
+        }
+    }
+
+    fn span_tokens(
+        Spanned(this, span): &Spanned<Self>,
+    ) -> Vec<(lsp_types::SemanticTokenType, Range<usize>)> {
+        if let Some(t) = this.token() {
+            return vec![(t, span.clone())];
+        }
+
+        match this {
+            Token::PNameLN(p, _) => {
+                let s = p.as_ref().map(|x| x.len()).unwrap_or(0);
+
+                vec![
+                    (
+                        lsp_types::SemanticTokenType::NAMESPACE,
+                        span.start..span.start + 1 + s,
+                    ),
+                    (
+                        lsp_types::SemanticTokenType::ENUM,
+                        span.start + s + 1..span.end,
+                    ),
+                ]
+            }
+            Token::BlankNodeLabel(_) => {
+                vec![(
+                    lsp_types::SemanticTokenType::VARIABLE,
+                    span.start + 2..span.end,
+                )]
+
+            },
+            _ => vec![],
+        }
     }
 }
 
@@ -99,6 +152,7 @@ impl std::fmt::Display for Token {
             Token::Number(_) => write!(f, "a number"),
             Token::Str(_, _) => write!(f, "a string"),
             Token::ANON => write!(f, "an inline blank node"),
+            Token::Comment(_) => write!(f, "a comment"),
         }
     }
 }

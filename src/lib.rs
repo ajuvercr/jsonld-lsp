@@ -5,7 +5,7 @@ pub mod contexts;
 pub mod lang;
 pub mod model;
 pub mod parent;
-pub mod parser;
+// pub mod parser;
 pub mod semantics;
 pub mod utils;
 pub mod web;

@@ -20,7 +20,7 @@ pub fn semantic_tokens<L: Lang>(
     let mut tokens: Vec<Option<SemanticTokenType>> = Vec::with_capacity(rope.len_chars());
     tokens.resize(rope.len_chars(), None);
 
-    lang.semantic_tokens(system, |token, ty| {
+    lang.special_semantic_tokens(|token, ty| {
         token.for_each(|i| tokens[i] = Some(ty.clone()));
     });
 
