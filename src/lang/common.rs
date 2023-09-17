@@ -1,7 +1,7 @@
 use std::{fmt::Display, hash::Hash, ops::Range};
 
 use chumsky::prelude::Simple;
-use lsp_types::{CompletionItemKind, SemanticToken, SemanticTokenType};
+use lsp_types::{CompletionItemKind, FormattingOptions, SemanticToken, SemanticTokenType};
 
 use crate::{model::Spanned, parent::ParentingSystem};
 
@@ -101,6 +101,10 @@ pub trait Lang {
     const TRIGGERS: &'static [&'static str];
     const LEGEND_TYPES: &'static [SemanticTokenType];
 
+    fn format(&mut self, options: FormattingOptions) -> Option<String> {
+        None
+    }
+
     fn tokenize(&mut self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>);
     fn parse(
         &self,
@@ -109,10 +113,7 @@ pub trait Lang {
     ) -> (Spanned<Self::Element>, Vec<Self::ElementError>);
     fn parents(&self, element: &Spanned<Self::Element>) -> ParentingSystem<Spanned<Self::Node>>;
 
-    fn special_semantic_tokens(
-        &self,
-        apply: impl FnMut(Range<usize>, SemanticTokenType) -> (),
-    );
+    fn special_semantic_tokens(&self, apply: impl FnMut(Range<usize>, SemanticTokenType) -> ());
 
     fn prepare_rename(
         &self,
