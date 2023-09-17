@@ -58,8 +58,16 @@ impl<T: Display + Eq + Hash> From<Simple<T>> for SimpleDiagnostic {
     }
 }
 
-pub trait Token {
+pub trait Token: Sized {
     fn token(&self) -> Option<SemanticTokenType>;
+
+    fn span_tokens(Spanned(this, span): &Spanned<Self>) -> Vec<(SemanticTokenType, Range<usize>)> {
+        if let Some(x) = this.token() {
+            vec![(x, span.clone())]
+        } else {
+            Vec::new()
+        }
+    }
 }
 
 pub trait Node<T> {
@@ -101,9 +109,8 @@ pub trait Lang {
     ) -> (Spanned<Self::Element>, Vec<Self::ElementError>);
     fn parents(&self, element: &Spanned<Self::Element>) -> ParentingSystem<Spanned<Self::Node>>;
 
-    fn semantic_tokens(
+    fn special_semantic_tokens(
         &self,
-        system: &ParentingSystem<Spanned<Self::Node>>,
         apply: impl FnMut(Range<usize>, SemanticTokenType) -> (),
     );
 

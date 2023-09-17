@@ -152,23 +152,22 @@ impl Lang for JsonLd {
         parent::system(element.clone())
     }
 
-    fn semantic_tokens(
+    fn special_semantic_tokens(
         &self,
-        system: &ParentingSystem<Spanned<Self::Node>>,
         mut apply: impl FnMut(Range<usize>, lsp_types::SemanticTokenType) -> (),
     ) {
         log::error!("Semantic tokens functions is called!");
-        system
+        self.parents
             .iter()
             .flat_map(|(_, x)| x.as_kv())
             .filter(|(ref x, _)| x.value() == "@id")
-            .map(|(_, id)| &system[*id])
+            .map(|(_, id)| &self.parents[*id])
             .filter(|x| x.is_leaf())
             .map(|x| x.clone().map(|x| x.into_leaf()))
             .filter(|x| x.is_string())
             .for_each(|x| apply(x.span().clone(), SemanticTokenType::VARIABLE));
 
-        system
+        self.parents
             .iter()
             .filter(|(_, x)| x.is_kv())
             .map(|(_, x)| x.to_kv())

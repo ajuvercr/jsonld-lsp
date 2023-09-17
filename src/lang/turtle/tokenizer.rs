@@ -1,22 +1,9 @@
 use std::ops::Range;
 
+use super::token::{StringStyle, Token};
 use chumsky::chain::Chain;
 use chumsky::prelude::*;
 use chumsky::Parser;
-use tower_lsp::lsp_types::SemanticTokenType;
-
-use super::token::{StringStyle, Token};
-
-pub const TOKEN_TYPES: &[SemanticTokenType] = &[
-    SemanticTokenType::FUNCTION,
-    SemanticTokenType::VARIABLE,
-    SemanticTokenType::STRING,
-    SemanticTokenType::COMMENT,
-    SemanticTokenType::NUMBER,
-    SemanticTokenType::KEYWORD,
-    SemanticTokenType::OPERATOR,
-    SemanticTokenType::PARAMETER,
-];
 
 macro_rules! t {
     ($t:ty) => {
@@ -46,6 +33,12 @@ fn tokens() -> t!(Token) {
         tok("true", Token::True),
         tok("false", Token::False),
     ))
+}
+
+fn comment() -> t!(Token) {
+    just('#')
+        .ignore_then(none_of("\n\r").repeated().collect())
+        .map(|x| Token::Comment(x))
 }
 
 fn iri_ref() -> t!(Token) {
@@ -342,6 +335,7 @@ fn pn_local_esc() -> t!(Vec<char>) {
 
 pub fn parse_token() -> t!(Token) {
     choice((
+        comment(),
         tokens(),
         iri_ref(),
         pname_ns(),
@@ -387,6 +381,7 @@ mod tests {
         assert!(integer().parse("14.0").is_ok());
         assert!(strings().parse("'testing'").is_ok());
         assert!(strings().parse("\"testing\"").is_ok());
+        assert!(comment().parse("# This is a nice comment").is_ok());
 
         assert!(parse_token().parse(".").is_ok());
     }
@@ -428,6 +423,7 @@ mod tests {
             @prefix elm: <http://elm.com/types#> .
             @prefix : <http://elm.com/types#> .
             @base <http://example.com/#> . 
+            # Test comment!
         ";
 
         assert!(parse_tokens().parse(input).is_ok());

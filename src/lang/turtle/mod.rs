@@ -15,6 +15,7 @@ pub use parser::*;
 use ropey::Rope;
 
 use crate::{
+    lang,
     model::{spanned, Spanned},
     parent::ParentingSystem,
     semantics::semantic_tokens,
@@ -23,6 +24,12 @@ use crate::{
 use self::node::{Leaf, Node};
 
 use super::{Lang, LangState};
+
+pub mod semantic_token {
+    use lsp_types::SemanticTokenType as STT;
+    pub const BOOLEAN: STT = STT::new("boolean");
+    pub const LANG_TAG: STT = STT::new("langTag");
+}
 
 pub struct TurtleLang {
     id: String,
@@ -54,12 +61,15 @@ impl Lang for TurtleLang {
     const TRIGGERS: &'static [&'static str] = &[];
 
     const LEGEND_TYPES: &'static [lsp_types::SemanticTokenType] = &[
-        SemanticTokenType::STRING,
-        SemanticTokenType::ENUM_MEMBER,
-        SemanticTokenType::NUMBER,
-        SemanticTokenType::VARIABLE,
+        semantic_token::BOOLEAN,
+        semantic_token::LANG_TAG,
+        SemanticTokenType::KEYWORD,
         SemanticTokenType::PROPERTY,
-        SemanticTokenType::FUNCTION,
+        SemanticTokenType::NUMBER,
+        SemanticTokenType::STRING,
+        SemanticTokenType::NAMESPACE,
+        SemanticTokenType::ENUM,
+        SemanticTokenType::VARIABLE,
     ];
 
     fn tokenize(&mut self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>) {
@@ -103,18 +113,22 @@ impl Lang for TurtleLang {
     }
 
     fn parents(&self, element: &Spanned<Self::Element>) -> ParentingSystem<Spanned<Self::Node>> {
-        let p = ParentingSystem::new_turtle(element.clone());
-
-        p
+        ParentingSystem::new()
+        // let p = ParentingSystem::new_turtle(element.clone());
+        //
+        // p
     }
 
-    fn semantic_tokens(
+    fn special_semantic_tokens(
         &self,
-        system: &ParentingSystem<Spanned<Self::Node>>,
-        apply: impl FnMut(Range<usize>, lsp_types::SemanticTokenType) -> (),
+        mut apply: impl FnMut(Range<usize>, lsp_types::SemanticTokenType) -> (),
     ) {
-
-        // TODO
+        use lang::Token;
+        self.tokens.iter().for_each(|token| {
+            Token::span_tokens(token)
+                .into_iter()
+                .for_each(|(token, span)| apply(span, token))
+        });
     }
 
     fn prepare_rename(
