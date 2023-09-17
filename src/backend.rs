@@ -75,6 +75,7 @@ where
                     all_commit_characters: None,
                     completion_item: None,
                 }),
+                document_formatting_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensRegistrationOptions(
                         SemanticTokensRegistrationOptions {
@@ -107,6 +108,42 @@ where
                 ..ServerCapabilities::default()
             },
         })
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri;
+        let mut langs = self.langs.lock().await;
+
+        let rope = {
+            let ropes = self.ropes.lock().await;
+            if let Some(rope) = ropes.get(uri.as_str()) {
+                rope.clone()
+            } else {
+                return Ok(None);
+            }
+        };
+
+        let line_count = rope.len_lines();
+        if line_count == 0 {
+            return Ok(None);
+        }
+
+        if let Some(lang) = langs.get_mut(uri.as_str()) {
+            if let Some(t) = lang.format(params.options) {
+                let end_line = rope.char_to_line(rope.len_chars());
+                // if let Some(r) = offsets_to_range(0, rope.len_chars() - 1, &rope) {
+                    return Ok(Some(vec![
+                        TextEdit::new(
+                            Range::new(Position::new(0, 0), Position::new(end_line as u32, 0)),
+                            t,
+                        ),
+                        // TextEdit::new(Range::new(Position::new(0, 0), Position::new(0, 0)), t),
+                    ]));
+                // }
+            }
+        }
+
+        Ok(None)
     }
 
     async fn prepare_rename(

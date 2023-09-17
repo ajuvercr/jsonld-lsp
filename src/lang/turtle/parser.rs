@@ -203,7 +203,7 @@ mod turtle_tests {
             Err::Tokenizing
         })?;
         let end = turtle.len() - 1..turtle.len() + 1;
-        let stream = Stream::from_iter(end, tokens.into_iter());
+        let stream = Stream::from_iter(end, tokens.into_iter().filter(|x| !x.0.is_comment()));
 
         parser.parse(stream).map_err(|err| {
             println!("Parse error {:?}", err);
@@ -311,9 +311,11 @@ mod turtle_tests {
     #[test]
     fn parse_turtle() {
         let txt = r#"
-        @base <>.
+        @base <>. #This is a very nice comment!
+#This is a very nice comment!
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 <a> <b> <c>.
+#This is a very nice comment!
             "#;
         let output = parse_it(txt, turtle()).expect("simple");
         assert_eq!(output.prefixes.len(), 1, "prefixes are parsed");

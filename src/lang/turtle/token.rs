@@ -76,6 +76,7 @@ impl lang::Token for Token {
             Token::Number(_) => Some(lsp_types::SemanticTokenType::NUMBER),
             Token::Str(_, _) => Some(lsp_types::SemanticTokenType::STRING),
             Token::PNameNS(_) => Some(lsp_types::SemanticTokenType::NAMESPACE),
+            Token::Comment(_) => Some(lsp_types::SemanticTokenType::COMMENT),
             _ => None,
         }
     }
@@ -107,8 +108,7 @@ impl lang::Token for Token {
                     lsp_types::SemanticTokenType::VARIABLE,
                     span.start + 2..span.end,
                 )]
-
-            },
+            }
             _ => vec![],
         }
     }
@@ -124,6 +124,17 @@ pub enum StringStyle {
     SingleLong,
     /// '...'
     Single,
+}
+
+impl StringStyle {
+    pub fn quote(&self) -> &'static str {
+        match self {
+            StringStyle::DoubleLong => "\"\"\"",
+            StringStyle::Double => "\"",
+            StringStyle::SingleLong => "'''",
+            StringStyle::Single => "'",
+        }
+    }
 }
 
 impl std::fmt::Display for Token {

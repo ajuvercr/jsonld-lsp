@@ -1,10 +1,11 @@
 pub mod tokenizer;
 // pub mod parser;
+mod formatter;
 mod model;
 mod node;
 mod parser;
 mod token;
-use lsp_types::SemanticTokenType;
+use lsp_types::{FormattingOptions, SemanticTokenType};
 use std::ops::Range;
 use token::Token;
 
@@ -21,7 +22,10 @@ use crate::{
     semantics::semantic_tokens,
 };
 
-use self::node::{Leaf, Node};
+use self::{
+    formatter::format,
+    node::{Leaf, Node},
+};
 
 use super::{Lang, LangState};
 
@@ -70,7 +74,14 @@ impl Lang for TurtleLang {
         SemanticTokenType::NAMESPACE,
         SemanticTokenType::ENUM,
         SemanticTokenType::VARIABLE,
+        SemanticTokenType::COMMENT,
     ];
+
+    fn format(&mut self, options: FormattingOptions) -> Option<String> {
+        let ts: Vec<_> = self.tokens.iter().map(|x| &x.0).collect();
+        let new = format(&ts, options);
+        Some(new)
+    }
 
     fn tokenize(&mut self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>) {
         self.rope = Rope::from(source.to_owned());
@@ -98,7 +109,11 @@ impl Lang for TurtleLang {
     ) -> (Spanned<Self::Element>, Vec<Self::ElementError>) {
         let stream = chumsky::Stream::from_iter(
             0..source.len() + 1,
-            tokens.clone().into_iter().map(|Spanned(x, s)| (x, s)),
+            tokens
+                .clone()
+                .into_iter()
+                .filter(|x| !x.is_comment())
+                .map(|Spanned(x, s)| (x, s)),
         );
 
         let parser = turtle()
