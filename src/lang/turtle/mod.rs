@@ -23,7 +23,7 @@ use crate::{
 };
 
 use self::{
-    formatter::format,
+    formatter::format_turtle,
     node::{Leaf, Node},
 };
 
@@ -78,9 +78,25 @@ impl Lang for TurtleLang {
     ];
 
     fn format(&mut self, options: FormattingOptions) -> Option<String> {
-        let ts: Vec<_> = self.tokens.iter().map(|x| &x.0).collect();
-        let new = format(&ts, options);
-        Some(new)
+        let stream = chumsky::Stream::from_iter(
+            0..self.rope.len_chars() + 1,
+            self.tokens
+                .clone()
+                .into_iter()
+                .filter(|x| !x.is_comment())
+                .map(|Spanned(x, s)| (x, s)),
+        );
+
+        let parser = turtle()
+            .map_with_span(spanned)
+            .then_ignore(end().recover_with(skip_then_retry_until([])));
+
+        let turtle = parser.parse(stream).ok()?;
+        format_turtle(&turtle.0, options)
+
+        // let ts: Vec<_> = self.tokens.iter().map(|x| &x.0).collect();
+        // let new = format(&ts, options);
+        // Some(new)
     }
 
     fn tokenize(&mut self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>) {

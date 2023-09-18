@@ -177,7 +177,7 @@ pub fn turtle() -> impl Parser<Token, Turtle, Error = Simple<Token>> {
 }
 
 #[cfg(test)]
-mod turtle_tests {
+pub mod turtle_tests {
     use chumsky::{prelude::Simple, Parser, Stream};
 
     use crate::lang::turtle::{
@@ -189,12 +189,12 @@ mod turtle_tests {
     use super::literal;
 
     #[derive(Debug)]
-    enum Err {
+    pub enum Err {
         Tokenizing,
         Parsing,
     }
 
-    fn parse_it<T, P: Parser<Token, T, Error = Simple<Token>>>(
+    pub fn parse_it<T, P: Parser<Token, T, Error = Simple<Token>>>(
         turtle: &str,
         parser: P,
     ) -> Result<T, Err> {
@@ -202,6 +202,7 @@ mod turtle_tests {
             println!("Token error {:?}", err);
             Err::Tokenizing
         })?;
+        println!("tokens {:?}", tokens);
         let end = turtle.len() - 1..turtle.len() + 1;
         let stream = Stream::from_iter(end, tokens.into_iter().filter(|x| !x.0.is_comment()));
 

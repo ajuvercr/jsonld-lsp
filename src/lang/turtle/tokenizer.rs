@@ -15,13 +15,19 @@ fn tok(st: &'static str, tok: Token) -> t!(Token) {
     just::<char, &str, Simple<char>>(st).to(tok)
 }
 
+fn keywords() -> t!(Token) {
+    just('@').ignore_then(choice((
+        just("prefix").to(Token::PrefixTag),
+        just("base").to(Token::BaseTag),
+    )))
+}
+
 fn tokens() -> t!(Token) {
     choice((
-        tok("@prefix", Token::PrefixTag),
-        tok("@base", Token::BaseTag),
+        // tok("@prefix", Token::PrefixTag),
+        // tok("@base", Token::BaseTag),
         tok("PREFIX", Token::SparqlPrefix),
         tok("BASE", Token::SparqlBase),
-        tok("a", Token::PredType),
         tok("[", Token::BNodeStart),
         tok("]", Token::BNodeEnd),
         tok("(", Token::ColStart),
@@ -30,6 +36,7 @@ fn tokens() -> t!(Token) {
         tok(".", Token::Stop),
         tok(",", Token::ObjectSplit),
         tok(";", Token::PredicateSplit),
+        tok("a", Token::PredType),
         tok("true", Token::True),
         tok("false", Token::False),
     ))
@@ -335,14 +342,15 @@ fn pn_local_esc() -> t!(Vec<char>) {
 
 pub fn parse_token() -> t!(Token) {
     choice((
+        keywords(),
         comment(),
-        tokens(),
         iri_ref(),
         pname_ns(),
         blank_node_label(),
         lang_tag(),
         integer(),
         strings(),
+        tokens(),
     ))
 }
 
@@ -369,7 +377,7 @@ mod tests {
 
     #[test]
     fn parse_keywords() {
-        assert!(tokens().parse("@prefix").is_ok());
+        assert!(keywords().parse("@prefix").is_ok());
         assert!(tokens().parse(".").is_ok());
         assert!(iri_ref().parse("<testing>").is_ok());
         assert!(pname_ns().parse(":").is_ok());
