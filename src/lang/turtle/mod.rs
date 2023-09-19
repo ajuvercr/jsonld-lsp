@@ -78,6 +78,10 @@ impl Lang for TurtleLang {
         SemanticTokenType::COMMENT,
     ];
 
+    fn pattern() -> Option<String> {
+        Some(String::from("*.{ttl,turtle}"))
+    }
+
     fn format(&mut self, options: FormattingOptions) -> Option<String> {
         let stream = chumsky::Stream::from_iter(
             0..self.rope.len_chars() + 1,
