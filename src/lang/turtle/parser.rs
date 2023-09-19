@@ -202,7 +202,6 @@ pub mod turtle_tests {
             println!("Token error {:?}", err);
             Err::Tokenizing
         })?;
-        println!("tokens {:?}", tokens);
         let end = turtle.len() - 1..turtle.len() + 1;
         let stream = Stream::from_iter(end, tokens.into_iter().filter(|x| !x.0.is_comment()));
 
