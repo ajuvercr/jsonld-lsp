@@ -165,6 +165,7 @@ struct FormatState<'a> {
     comments: &'a [Spanned<String>],
     comments_idx: usize,
     tail: Spanned<String>,
+    line_count: usize,
 }
 
 impl<'a> FormatState<'a> {
@@ -191,6 +192,7 @@ impl<'a> FormatState<'a> {
             buf,
             comments,
             comments_idx: 0,
+            line_count: 0,
         }
     }
 
@@ -214,6 +216,7 @@ impl<'a> FormatState<'a> {
         self.buf.position() - self.line_start
     }
     fn new_line(&mut self) -> io::Result<()> {
+        self.line_count += 1;
         write!(self.buf, "\n")?;
         self.line_start = self.buf.position();
         for _ in 0..self.indent_level {
@@ -242,16 +245,17 @@ impl FormatState<'_> {
             self.new_line()?;
         }
 
-        let mut request_newline = turtle.base.is_some() || !turtle.prefixes.is_empty();
+        let mut prev_line = 0;
 
         for t in &turtle.triples {
-            if request_newline {
+            if prev_line + 1 < self.line_count {
                 self.new_line()?;
             }
+            prev_line = self.line_count;
             self.check_comments(&t.1)?;
             self.write_triple(&t)?;
             self.new_line()?;
-            request_newline = t.0.po.len() > 1;
+            // request_newline = t.0.po.len() > 1 || t.0.po[0].0.object.len() > 1;
         }
         self.new_line()?;
 
@@ -322,6 +326,7 @@ impl FormatState<'_> {
         let mut should_indent = false;
 
         let start = self.buf.position();
+        let current_line = self.line_count;
         for i in 1..po.object.len() {
             write!(self.buf, ", ")?;
             self.write_term(&po.object[i])?;
@@ -332,8 +337,10 @@ impl FormatState<'_> {
                 break;
             }
         }
-        self.buf.set_position(start);
+
         if should_indent {
+            self.buf.set_position(start);
+            self.line_count = current_line;
             self.inc();
             for i in 1..po.object.len() {
                 write!(self.buf, ",")?;
@@ -612,6 +619,51 @@ mod tests {
 
 #trailing comments
 "#;
+        let (output, comments) = parse_turtle(txt).expect("Simple");
+        let formatted = format_turtle(
+            &output,
+            lsp_types::FormattingOptions {
+                tab_size: 2,
+                ..Default::default()
+            },
+            &comments,
+            &Rope::from_str(txt),
+        )
+        .expect("formatting");
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn bug_1() {
+        let txt = r#"
+[] a sh:NodeShape;
+  sh:targetClass js:Echo;
+  sh:property [
+    sh:class :ReaderChannel;
+    sh:path js:input;
+    sh:name "Input Channel"
+  ], [
+    sh:class :WriterChannel;
+    sh:path js:output;
+    sh:name "Output Channel"
+  ].
+
+"#;
+
+        let expected = r#"[ ] a sh:NodeShape;
+  sh:targetClass js:Echo;
+  sh:property [
+    sh:class :ReaderChannel;
+    sh:path js:input;
+    sh:name "Input Channel";
+  ], [
+    sh:class :WriterChannel;
+    sh:path js:output;
+    sh:name "Output Channel";
+  ].
+
+"#;
+
         let (output, comments) = parse_turtle(txt).expect("Simple");
         let formatted = format_turtle(
             &output,

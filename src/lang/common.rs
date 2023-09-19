@@ -101,6 +101,10 @@ pub trait Lang {
     const TRIGGERS: &'static [&'static str];
     const LEGEND_TYPES: &'static [SemanticTokenType];
 
+    fn pattern() -> Option<String> {
+        None
+    }
+
     fn format(&mut self, options: FormattingOptions) -> Option<String> {
         None
     }

@@ -84,7 +84,7 @@ where
                                     document_selector: Some(vec![DocumentFilter {
                                         language: Some(L::LANG.to_string()),
                                         scheme: Some("file".to_string()),
-                                        pattern: None,
+                                        pattern: L::pattern(),
                                     }]),
                                 }
                             },
@@ -132,13 +132,13 @@ where
             if let Some(t) = lang.format(params.options) {
                 let end_line = rope.char_to_line(rope.len_chars());
                 // if let Some(r) = offsets_to_range(0, rope.len_chars() - 1, &rope) {
-                    return Ok(Some(vec![
-                        TextEdit::new(
-                            Range::new(Position::new(0, 0), Position::new(end_line as u32, 0)),
-                            t,
-                        ),
-                        // TextEdit::new(Range::new(Position::new(0, 0), Position::new(0, 0)), t),
-                    ]));
+                return Ok(Some(vec![
+                    TextEdit::new(
+                        Range::new(Position::new(0, 0), Position::new(end_line as u32, 0)),
+                        t,
+                    ),
+                    // TextEdit::new(Range::new(Position::new(0, 0), Position::new(0, 0)), t),
+                ]));
                 // }
             }
         }
