@@ -107,7 +107,7 @@ pub trait Lang {
 
     fn tokenize(&mut self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>);
     fn parse(
-        &self,
+        &mut self,
         source: &str,
         tokens: &Vec<Spanned<Self::Token>>,
     ) -> (Spanned<Self::Element>, Vec<Self::ElementError>);

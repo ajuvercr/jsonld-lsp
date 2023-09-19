@@ -1,6 +1,12 @@
-use std::io::{self, Cursor, Write};
+use std::{
+    io::{self, Cursor, Write},
+    ops::Range,
+};
 
 use lsp_types::FormattingOptions;
+use ropey::Rope;
+
+use crate::model::{spanned, Spanned};
 
 use super::{token::Token, Base, BlankNode, Prefix, Term, Triple, Turtle, PO};
 
@@ -151,24 +157,58 @@ pub fn format(tokens: &[&Token], options: FormattingOptions) -> String {
 }
 
 type Buf = Cursor<Vec<u8>>;
-struct FormatState {
+struct FormatState<'a> {
     indent_level: usize,
     indent: String,
     buf: Buf,
     line_start: u64,
+    comments: &'a [Spanned<String>],
+    comments_idx: usize,
+    tail: Spanned<String>,
 }
-impl FormatState {
-    fn new(options: FormattingOptions, buf: Buf) -> Self {
+
+impl<'a> FormatState<'a> {
+    fn new(
+        options: FormattingOptions,
+        buf: Buf,
+        comments: &'a [Spanned<String>],
+        source: &'a Rope,
+    ) -> Self {
         let mut indent = String::new();
         for _ in 0..options.tab_size {
             indent.push(' ');
         }
+
+        let tail = spanned(
+            String::new(),
+            source.len_chars() + 1..source.len_chars() + 1,
+        );
         Self {
+            tail,
             line_start: 0,
             indent_level: 0,
             indent,
             buf,
+            comments,
+            comments_idx: 0,
         }
+    }
+
+    fn check_comments(&mut self, span: &Range<usize>) -> io::Result<bool> {
+        let mut first = true;
+        loop {
+            let current = self.comments.get(self.comments_idx).unwrap_or(&self.tail);
+
+            if current.1.start > span.start {
+                break;
+            }
+
+            first = false;
+            write!(self.buf, "#{}", current.0)?;
+            self.new_line()?;
+            self.comments_idx += 1;
+        }
+        Ok(!first)
     }
     fn current_line_length(&self) -> u64 {
         self.buf.position() - self.line_start
@@ -189,13 +229,15 @@ impl FormatState {
     }
 }
 
-impl FormatState {
+impl FormatState<'_> {
     fn write_turtle(&mut self, turtle: &Turtle) -> io::Result<()> {
         if let Some(ref b) = turtle.base {
+            self.check_comments(&b.1)?;
             self.write_base(b)?;
             self.new_line()?;
         }
         for p in &turtle.prefixes {
+            self.check_comments(&p.1)?;
             self.write_prefix(p)?;
             self.new_line()?;
         }
@@ -206,11 +248,17 @@ impl FormatState {
             if request_newline {
                 self.new_line()?;
             }
+            self.check_comments(&t.1)?;
             self.write_triple(&t)?;
             self.new_line()?;
             request_newline = t.0.po.len() > 1;
         }
         self.new_line()?;
+
+        for i in self.comments_idx..self.comments.len() {
+            write!(self.buf, "#{}", self.comments[i].0)?;
+            self.new_line()?;
+        }
 
         Ok(())
     }
@@ -235,17 +283,17 @@ impl FormatState {
                 let is_first_of_line = self.current_line_length() == 0;
                 self.inc();
                 write!(self.buf, "[")?;
-                if is_first_of_line {
+                let should_skip = if is_first_of_line {
                     write!(self.buf, " ")?;
                     self.write_po(&pos[0])?;
                     write!(self.buf, ";")?;
+                    1
                 } else {
+                    0
+                };
+                for po in pos.iter().skip(should_skip) {
                     self.new_line()?;
-                    self.write_po(&pos[0])?;
-                    write!(self.buf, ";")?;
-                }
-                for po in pos.iter().skip(1) {
-                    self.new_line()?;
+                    self.check_comments(&po.1)?;
                     self.write_po(&po)?;
                     write!(self.buf, ";")?;
                 }
@@ -290,6 +338,7 @@ impl FormatState {
             for i in 1..po.object.len() {
                 write!(self.buf, ",")?;
                 self.new_line()?;
+                self.check_comments(&po.object[i].1)?;
                 self.write_term(&po.object[i])?;
             }
             self.decr();
@@ -311,7 +360,9 @@ impl FormatState {
         }
         write!(self.buf, ";")?;
         self.inc();
+
         self.new_line()?;
+        self.check_comments(&triple.po[1].1)?;
         self.write_po(&triple.po[1])?;
 
         if triple.po.len() == 2 {
@@ -323,6 +374,7 @@ impl FormatState {
         for i in 2..triple.po.len() {
             write!(self.buf, ";")?;
             self.new_line()?;
+            self.check_comments(&triple.po[i].1)?;
             self.write_po(&triple.po[i])?;
         }
 
@@ -332,16 +384,60 @@ impl FormatState {
     }
 }
 
-pub fn format_turtle(turtle: &Turtle, config: FormattingOptions) -> Option<String> {
+pub fn format_turtle(
+    turtle: &Turtle,
+    config: FormattingOptions,
+    comments: &[Spanned<String>],
+    source: &Rope,
+) -> Option<String> {
     let buf: Buf = Cursor::new(Vec::new());
-    let mut state = FormatState::new(config, buf);
+    let mut state = FormatState::new(config, buf, comments, source);
     state.write_turtle(turtle).ok()?;
     String::from_utf8(state.buf.into_inner()).ok()
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::lang::turtle::{formatter::format_turtle, turtle, turtle_tests::parse_it};
+
+    use chumsky::{Parser, Stream};
+    use ropey::Rope;
+
+    use crate::{
+        lang::turtle::{formatter::format_turtle, parser::turtle, tokenizer, Turtle},
+        model::{spanned, Spanned},
+    };
+
+    #[derive(Debug)]
+    pub enum Err {
+        Tokenizing,
+        Parsing,
+    }
+
+    fn parse_turtle(inp: &str) -> Result<(Turtle, Vec<Spanned<String>>), Err> {
+        let tokens = tokenizer::parse_tokens().parse(inp).map_err(|err| {
+            println!("Token error {:?}", err);
+            Err::Tokenizing
+        })?;
+        let end = inp.len() - 1..inp.len() + 1;
+
+        let mut comments: Vec<_> = tokens
+            .iter()
+            .filter(|x| x.0.is_comment())
+            .cloned()
+            .map(|x| spanned(x.0.to_comment(), x.1))
+            .collect();
+        comments.sort_by_key(|x| x.1.start);
+
+        let stream = Stream::from_iter(end, tokens.into_iter().filter(|x| !x.0.is_comment()));
+
+        turtle()
+            .parse(stream)
+            .map_err(|err| {
+                println!("Parse error {:?}", err);
+                Err::Parsing
+            })
+            .map(|t| (t, comments))
+    }
 
     #[test]
     fn easy_format() {
@@ -362,13 +458,15 @@ mod tests {
   foaf:knows <abc>.
 
 "#;
-        let output = parse_it(txt, turtle()).expect("Simple");
+        let (output, comments) = parse_turtle(txt).expect("Simple");
         let formatted = format_turtle(
             &output,
             lsp_types::FormattingOptions {
                 tab_size: 2,
                 ..Default::default()
             },
+            &comments,
+            &Rope::from_str(txt),
         )
         .expect("formatting");
         assert_eq!(formatted, expected);
@@ -387,13 +485,15 @@ mod tests {
   foaf:knows2 <abc>.
 
 "#;
-        let output = parse_it(txt, turtle()).expect("Simple");
+        let (output, comments) = parse_turtle(txt).expect("Simple");
         let formatted = format_turtle(
             &output,
             lsp_types::FormattingOptions {
                 tab_size: 2,
                 ..Default::default()
             },
+            &comments,
+            &Rope::from_str(txt),
         )
         .expect("formatting");
         assert_eq!(formatted, expected);
@@ -420,13 +520,15 @@ mod tests {
 ].
 
 "#;
-        let output = parse_it(txt, turtle()).expect("Simple");
+        let (output, comments) = parse_turtle(txt).expect("Simple");
         let formatted = format_turtle(
             &output,
             lsp_types::FormattingOptions {
                 tab_size: 2,
                 ..Default::default()
             },
+            &comments,
+            &Rope::from_str(txt),
         )
         .expect("formatting");
         assert_eq!(formatted, expected);
@@ -445,13 +547,80 @@ mod tests {
   <soemthing eeeellssee>.
 
 "#;
-        let output = parse_it(txt, turtle()).expect("Simple");
+        let (output, comments) = parse_turtle(txt).expect("Simple");
         let formatted = format_turtle(
             &output,
             lsp_types::FormattingOptions {
                 tab_size: 2,
                 ..Default::default()
             },
+            &comments,
+            &Rope::from_str(txt),
+        )
+        .expect("formatting");
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn easy_comments() {
+        let txt = r#"
+# Test this is a cool test or something!
+            # Another comment!
+
+[] a foaf:Name;
+   foaf:knows <abc>; foaf:knows2 <abc>.
+
+"#;
+
+        let expected = r#"# Test this is a cool test or something!
+# Another comment!
+[ ] a foaf:Name;
+  foaf:knows <abc>;
+  foaf:knows2 <abc>.
+
+"#;
+        let (output, comments) = parse_turtle(txt).expect("Simple");
+        let formatted = format_turtle(
+            &output,
+            lsp_types::FormattingOptions {
+                tab_size: 2,
+                ..Default::default()
+            },
+            &comments,
+            &Rope::from_str(txt),
+        )
+        .expect("formatting");
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn hard_comments() {
+        let txt = r#"
+
+[] a foaf:Name; # Nested comment
+   foaf:knows <abc>;     # Another comment!
+   foaf:knows2 <abc>.
+
+   #trailing comments
+"#;
+
+        let expected = r#"[ ] a foaf:Name;
+  # Nested comment
+  foaf:knows <abc>;
+  # Another comment!
+  foaf:knows2 <abc>.
+
+#trailing comments
+"#;
+        let (output, comments) = parse_turtle(txt).expect("Simple");
+        let formatted = format_turtle(
+            &output,
+            lsp_types::FormattingOptions {
+                tab_size: 2,
+                ..Default::default()
+            },
+            &comments,
+            &Rope::from_str(txt),
         )
         .expect("formatting");
         assert_eq!(formatted, expected);

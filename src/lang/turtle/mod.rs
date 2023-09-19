@@ -39,6 +39,7 @@ pub struct TurtleLang {
     id: String,
     rope: Rope,
     tokens: Vec<Spanned<Token>>,
+    comments: Vec<Spanned<String>>,
     parents: ParentingSystem<Spanned<<Self as Lang>::Node>>,
 }
 
@@ -92,7 +93,7 @@ impl Lang for TurtleLang {
             .then_ignore(end().recover_with(skip_then_retry_until([])));
 
         let turtle = parser.parse(stream).ok()?;
-        format_turtle(&turtle.0, options)
+        format_turtle(&turtle.0, options, &self.comments, &self.rope)
 
         // let ts: Vec<_> = self.tokens.iter().map(|x| &x.0).collect();
         // let new = format(&ts, options);
@@ -119,14 +120,23 @@ impl Lang for TurtleLang {
     }
 
     fn parse(
-        &self,
+        &mut self,
         source: &str,
         tokens: &Vec<Spanned<Self::Token>>,
     ) -> (Spanned<Self::Element>, Vec<Self::ElementError>) {
+        let tokens = tokens.clone();
+        let mut comments: Vec<_> = tokens
+            .iter()
+            .filter(|x| x.is_comment())
+            .cloned()
+            .map(|x| x.map(|x| x.to_comment()))
+            .collect();
+        comments.sort_by_key(|x| x.1.start);
+        self.comments = comments;
+
         let stream = chumsky::Stream::from_iter(
             0..source.len() + 1,
             tokens
-                .clone()
                 .into_iter()
                 .filter(|x| !x.is_comment())
                 .map(|Spanned(x, s)| (x, s)),
@@ -182,6 +192,7 @@ impl Lang for TurtleLang {
             id,
             tokens: Vec::new(),
             rope: Rope::new(),
+            comments: Vec::new(),
             parents: ParentingSystem::new(),
         }
     }

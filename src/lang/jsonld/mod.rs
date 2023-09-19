@@ -141,7 +141,7 @@ impl Lang for JsonLd {
     }
 
     fn parse(
-        &self,
+        &mut self,
         source: &str,
         tokens: &Vec<Spanned<Self::Token>>,
     ) -> (Spanned<Self::Element>, Vec<Self::ElementError>) {
