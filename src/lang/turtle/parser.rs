@@ -84,16 +84,22 @@ fn subject() -> impl Parser<Token, Subject, Error = Simple<Token>> + Clone {
 }
 
 fn term(
-    bn: impl Clone + Parser<Token, BlankNode, Error = Simple<Token>>,
+    bn: impl Clone + Parser<Token, BlankNode, Error = Simple<Token>> + 'static,
 ) -> impl Parser<Token, Term, Error = Simple<Token>> + Clone {
-    named_node()
-        .map(|x| Term::NamedNode(x))
-        .or(bn.map(|x| Term::BlankNode(x)))
-        .or(literal().map(|x| Term::Literal(x)))
+    recursive(|term| {
+        term.map_with_span(spanned)
+            .repeated()
+            .delimited_by(just(Token::ColStart), just(Token::ColEnd))
+            .map(|x| Term::Collection(x))
+            .or(named_node()
+                .map(|x| Term::NamedNode(x))
+                .or(bn.map(|x| Term::BlankNode(x)))
+                .or(literal().map(|x| Term::Literal(x))))
+    })
 }
 
 fn po(
-    bn: impl Clone + Parser<Token, BlankNode, Error = Simple<Token>>,
+    bn: impl Clone + Parser<Token, BlankNode, Error = Simple<Token>> + 'static,
 ) -> impl Parser<Token, PO, Error = Simple<Token>> + Clone {
     named_node()
         .map_with_span(spanned)

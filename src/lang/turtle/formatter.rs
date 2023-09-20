@@ -310,11 +310,55 @@ impl FormatState<'_> {
         Ok(())
     }
 
+    fn write_collection(&mut self, coll: &Vec<Spanned<Term>>) -> io::Result<()> {
+        if coll.is_empty() {
+            return write!(self.buf, "( )");
+        }
+
+        let mut should_indent = false;
+        let start = self.buf.position();
+        let current_line = self.line_count;
+
+        write!(self.buf, "( ")?;
+
+        self.check_comments(&coll[0].1)?;
+        self.write_term(&coll[0])?;
+
+        for po in coll.iter().skip(1) {
+            self.check_comments(&po.1)?;
+            write!(self.buf, " ")?;
+            self.write_term(&po)?;
+            if self.current_line_length() > 80 {
+                should_indent = true;
+                break;
+            }
+        }
+        write!(self.buf, " )")?;
+
+        if should_indent {
+            self.buf.set_position(start);
+            self.line_count = current_line;
+            write!(self.buf, "(")?;
+            self.inc();
+            for po in coll.iter() {
+                self.new_line()?;
+                self.check_comments(&po.1)?;
+                self.write_term(&po)?;
+            }
+            self.decr();
+            self.new_line()?;
+            write!(self.buf, ")")?;
+        }
+
+        Ok(())
+    }
+
     fn write_term(&mut self, term: &Term) -> io::Result<()> {
         match term {
             Term::Literal(s) => write!(self.buf, "{}", s)?,
             Term::BlankNode(b) => self.write_bnode(b)?,
             Term::NamedNode(n) => write!(self.buf, "{}", n)?,
+            Term::Collection(ts) => self.write_collection(ts)?,
             Term::Invalid => return Err(io::Error::new(io::ErrorKind::Other, "")),
         }
         Ok(())
@@ -331,7 +375,6 @@ impl FormatState<'_> {
             write!(self.buf, ", ")?;
             self.write_term(&po.object[i])?;
 
-            println!("current line length {}", self.current_line_length());
             if self.current_line_length() > 80 {
                 should_indent = true;
                 break;
@@ -552,6 +595,57 @@ mod tests {
   <something longer>,
   <something tes>,
   <soemthing eeeellssee>.
+
+"#;
+        let (output, comments) = parse_turtle(txt).expect("Simple");
+        let formatted = format_turtle(
+            &output,
+            lsp_types::FormattingOptions {
+                tab_size: 2,
+                ..Default::default()
+            },
+            &comments,
+            &Rope::from_str(txt),
+        )
+        .expect("formatting");
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn short_collection() {
+        let txt = r#"
+        <abc> a (), (<abc> <def>).
+"#;
+
+        let expected = r#"<abc> a ( ), ( <abc> <def> ).
+
+"#;
+        let (output, comments) = parse_turtle(txt).expect("Simple");
+        let formatted = format_turtle(
+            &output,
+            lsp_types::FormattingOptions {
+                tab_size: 2,
+                ..Default::default()
+            },
+            &comments,
+            &Rope::from_str(txt),
+        )
+        .expect("formatting");
+        assert_eq!(formatted, expected);
+    }
+
+    #[test]
+    fn long_collection() {
+        let txt = r#"
+        <abc> a (), (<somevery very very long item> <and othersss> <and ottteeehs> <wheeeeeeeeeeeee>).
+"#;
+
+        let expected = r#"<abc> a ( ), (
+  <somevery very very long item>
+  <and othersss>
+  <and ottteeehs>
+  <wheeeeeeeeeeeee>
+).
 
 "#;
         let (output, comments) = parse_turtle(txt).expect("Simple");

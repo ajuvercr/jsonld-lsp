@@ -111,6 +111,7 @@ pub enum Term {
     Literal(Literal),
     BlankNode(BlankNode),
     NamedNode(NamedNode),
+    Collection(Vec<Spanned<Term>>),
     Invalid,
 }
 
@@ -120,6 +121,14 @@ impl Display for Term {
             Term::Literal(l) => l.fmt(f),
             Term::BlankNode(b) => b.fmt(f),
             Term::NamedNode(n) => n.fmt(f),
+            Term::Collection(n) => {
+                write!(f, "( ")?;
+                for l in n {
+                    l.fmt(f)?;
+                }
+                write!(f, "  )")?;
+                Ok(())
+            }
             Term::Invalid => write!(f, "invalid"),
         }
     }
