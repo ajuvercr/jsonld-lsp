@@ -67,6 +67,7 @@ pub enum Node {
     Base(Range<usize>, usize),
     Prefix(Range<usize>, Spanned<String>, usize),
     Root(Vec<usize>),
+    Collection(Vec<usize>),
     Invalid,
 }
 
@@ -124,8 +125,25 @@ impl ParentingSystem<Spanned<Node>> {
             Term::Literal(x) => self.add_leaf(Spanned(x, span), parent),
             Term::NamedNode(x) => self.add_leaf(Spanned(x, span), parent),
             Term::BlankNode(x) => self.add_bnode(Spanned(x, span), parent),
+            Term::Collection(x) => self.add_collection(Spanned(x, span), parent),
             Term::Invalid => todo!(),
         }
+    }
+
+    fn add_collection(
+        &mut self,
+        Spanned(terms, span): Spanned<Vec<Spanned<Term>>>,
+        parent: usize,
+    ) -> usize {
+        let element = self.increment(parent);
+
+        let nodes: Vec<_> = terms
+            .into_iter()
+            .map(|t| self.add_term(t, element))
+            .collect();
+
+        self.objects[element] = spanned(Node::Collection(nodes), span);
+        element
     }
 
     fn add_bnode(&mut self, Spanned(bnode, span): Spanned<BlankNode>, parent: usize) -> usize {
