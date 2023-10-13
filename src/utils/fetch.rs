@@ -1,5 +1,5 @@
-use crate::utils::log;
 use std::collections::HashMap;
+use tracing::{debug, error};
 
 use reqwest::header::HeaderMap;
 
@@ -24,18 +24,18 @@ pub async fn fetch(url: &str, headers: &HashMap<String, String>) -> std::result:
         .into_iter()
         .fold(builder, |builder, (k, v)| builder.header(k, v));
 
-    log("sending blcoking");
+    debug!("sending blcoking");
     let resp = match builder.send() {
         Ok(x) => x,
         Err(e) => {
-            log(format!("Error: {:?}", e));
+            error!(error = ?e);
             return Err(());
         }
     };
 
     let status = resp.status().as_u16();
     let headers = resp.headers().clone();
-    log("got resp");
+    debug!("got resp");
     let body = resp.text().unwrap();
 
     Ok(Resp {

@@ -5,6 +5,7 @@ use crate::utils::{offset_to_position, offsets_to_range, position_to_offset};
 
 use futures::lock::Mutex;
 use ropey::Rope;
+use tracing::info;
 
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -59,9 +60,10 @@ where
     <L as Lang>::Element: Send + Sync + 'static,
     <L as Lang>::ElementError: Send + Sync + 'static,
 {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    #[tracing::instrument(skip(self, _init))]
+    async fn initialize(&self, _init: InitializeParams) -> Result<InitializeResult> {
+        info!("Initialize");
         let triggers = L::TRIGGERS.iter().copied().map(String::from).collect();
-        log::error!("initialize");
         Ok(InitializeResult {
             server_info: None,
             capabilities: ServerCapabilities {
@@ -91,7 +93,7 @@ where
                             semantic_tokens_options: SemanticTokensOptions {
                                 work_done_progress_options: WorkDoneProgressOptions::default(),
                                 legend: SemanticTokensLegend {
-                                    token_types: L::LEGEND_TYPES.clone().into(),
+                                    token_types: L::LEGEND_TYPES.into(),
                                     token_modifiers: vec![],
                                 },
                                 range: Some(false),
@@ -110,7 +112,9 @@ where
         })
     }
 
+    #[tracing::instrument(skip(self))]
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        info!("formatting");
         let uri = params.text_document.uri;
         let mut langs = self.langs.lock().await;
 
@@ -146,10 +150,12 @@ where
         Ok(None)
     }
 
+    #[tracing::instrument(skip(self, params), fields(uri = %params.text_document.uri.as_str()))]
     async fn prepare_rename(
         &self,
         params: TextDocumentPositionParams,
     ) -> Result<Option<PrepareRenameResponse>> {
+        info!("prepare rename");
         let loc = params.position;
         let uri = params.text_document.uri;
 
@@ -184,7 +190,9 @@ where
         Ok(None)
     }
 
+    #[tracing::instrument(skip(self, params), fields(uri = %params.text_document_position.text_document.uri.as_str(), position = ?params.text_document_position.position))]
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        info!("rename");
         let new_id = params.new_name;
 
         let loc = params.text_document_position.position;
@@ -231,11 +239,12 @@ where
         Ok(None)
     }
 
+    #[tracing::instrument(skip(self, params), fields(uri = %params.text_document.uri.as_str()))]
     async fn semantic_tokens_full(
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
-        log::error!("semantic tokens full");
+        info!("semantic tokens full");
         let uri = params.text_document.uri.as_str();
         let mut langs = self.langs.lock().await;
         if let Some(lang) = langs.get_mut(uri) {
@@ -248,12 +257,13 @@ where
         Ok(None)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn shutdown(&self) -> Result<()> {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, params), fields(uri = %params.text_document.uri.as_str()))]
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        log::error!("did open");
         self.on_change(TextDocumentItem {
             uri: params.text_document.uri,
             text: params.text_document.text,
@@ -262,25 +272,19 @@ where
         .await;
     }
 
-    async fn did_change(
-        &self,
-        DidChangeTextDocumentParams {
-            text_document,
-            content_changes,
-        }: DidChangeTextDocumentParams,
-    ) {
-        log::error!("did change");
-        let text: String = content_changes[0].text.clone();
+    #[tracing::instrument(skip(self, params), fields(uri = %params.text_document.uri.as_str()))]
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let text: String = params.content_changes[0].text.clone();
         self.on_change(TextDocumentItem {
-            uri: text_document.uri,
-            version: text_document.version,
+            uri: params.text_document.uri,
+            version: params.text_document.version,
             text,
         })
         .await;
     }
 
+    #[tracing::instrument(skip(self, params), fields(uri = %params.text_document_position.text_document.uri.as_str()))]
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        log::error!("completion");
         let id = params.text_document_position.text_document.uri.to_string();
 
         let mut langs = self.langs.lock().await;
