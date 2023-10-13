@@ -1,3 +1,5 @@
 {
-    "@context": "https://raw.githubusercontent.com/json-ld/json-ld.org/main/contexts/person.jsonld"
+    "@context": "https://raw.githubusercontent.com/json-ld/json-ld.org/main/contexts/person.jsonld",
+    "died": {"@id": "testing"},
+    "knows": {"@id": "testing"}
 }

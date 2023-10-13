@@ -135,11 +135,13 @@ impl Lang for JsonLd {
         SemanticTokenType::ENUM_MEMBER,
     ];
 
+    #[tracing::instrument(skip(self), fields(id=self.id))]
     fn tokenize(&mut self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>) {
         self.rope = Rope::from(source.to_owned());
         tokenize(source)
     }
 
+    #[tracing::instrument(skip(self), fields(id=self.id))]
     fn parse(
         &mut self,
         source: &str,
@@ -152,11 +154,11 @@ impl Lang for JsonLd {
         parent::system(element.clone())
     }
 
+    #[tracing::instrument(skip(self, apply), fields(id=self.id))]
     fn special_semantic_tokens(
         &self,
         mut apply: impl FnMut(Range<usize>, lsp_types::SemanticTokenType) -> (),
     ) {
-        log::error!("Semantic tokens functions is called!");
         self.parents
             .iter()
             .flat_map(|(_, x)| x.as_kv())
@@ -180,6 +182,7 @@ impl Lang for JsonLd {
             });
     }
 
+    #[tracing::instrument(skip(self), fields(id=self.id))]
     fn prepare_rename(
         &self,
         pos: usize,
@@ -197,6 +200,7 @@ impl Lang for JsonLd {
             .ok_or(())
     }
 
+    #[tracing::instrument(skip(self), fields(id=self.id))]
     fn rename(
         &self,
         pos: usize,
@@ -226,6 +230,7 @@ impl Lang for JsonLd {
 
 #[async_trait::async_trait]
 impl LangState for JsonLd {
+    #[tracing::instrument(skip(self, parents), fields(id=self.id))]
     async fn update(&mut self, parents: ParentingSystem<Spanned<<JsonLd as Lang>::Node>>) {
         self.parents = parents;
         if let Ok(bytes) = self.parents.to_json_vec() {
@@ -238,13 +243,13 @@ impl LangState for JsonLd {
         }
     }
 
+    #[tracing::instrument(skip(self), fields(id=self.id))]
     async fn do_semantic_tokens(&mut self) -> Vec<SemanticToken> {
-        log::error!("Semantic tokens functions is called!");
         semantic_tokens(self, &self.parents, &self.rope)
     }
 
+    #[tracing::instrument(skip(self), fields(id=self.id))]
     async fn do_completion(&mut self, trigger: Option<String>) -> Vec<super::SimpleCompletion> {
-        log::error!("Completion functions is called!");
         if trigger == Some("@".to_string()) {
             self.get_ids()
                 .into_iter()

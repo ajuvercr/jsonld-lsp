@@ -5,6 +5,7 @@ use crate::{
     parent::ParentingSystem,
 };
 use ropey::Rope;
+use tracing::info;
 
 struct T {
     start: usize,
@@ -40,7 +41,6 @@ pub fn semantic_tokens<L: Lang>(
     for (i, ty) in tokens.into_iter().enumerate() {
         if last != ty {
             if let Some(t) = last {
-                log::error!("sem tokens {} - {} {:?}", start, i, t);
                 out_tokens.push(T {
                     start,
                     length: i - start,
@@ -54,13 +54,14 @@ pub fn semantic_tokens<L: Lang>(
     }
 
     if let Some(t) = last {
-        log::error!("sem tokens {} - end {:?}", start, t);
         out_tokens.push(T {
             start,
             length: rope.len_chars() - start,
             ty: L::LEGEND_TYPES.iter().position(|x| x == &t).unwrap_or(0),
         });
     }
+
+    info!(tokens = out_tokens.len());
 
     let mut pre_line = 0;
     let mut pre_start = 0;

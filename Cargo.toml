@@ -43,6 +43,8 @@ enum-methods = "0.0.8"
 as_variant = "1.1.0"
 async-trait = "0.1.68"
 hyper = "0.14.26"
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3.17", features = ["json"] }
 
 [dependencies.web-sys]
 version = "0.3.63"

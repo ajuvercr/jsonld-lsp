@@ -1,22 +1,26 @@
 use jsonld_language_server::backend::Backend;
 use jsonld_language_server::lang::jsonld::JsonLd;
-use log::LevelFilter;
 use std::fs::File;
+use std::io;
+use std::sync::Mutex;
 use tower_lsp::LspService;
 use tower_lsp::Server;
+use tracing::Level;
+use tracing_subscriber::fmt;
 
 #[tokio::main]
 async fn main() {
-    let target = match File::create("/tmp/json_ld-lsp.txt") {
-        Ok(x) => env_logger::Target::Pipe(Box::new(x)),
-        Err(_) => env_logger::Target::Stderr,
+    let target: Box<dyn io::Write + Send + Sync> = match File::create("/tmp/json_ld-lsp.txt") {
+        Ok(x) => Box::new(x),
+        Err(_) => Box::new(std::io::stdout()),
     };
 
-    env_logger::Builder::from_default_env()
-        .target(target)
+    fmt()
+        .with_file(true)
+        .with_line_number(true)
+        .with_max_level(Level::DEBUG)
+        .with_writer(Mutex::new(target))
         .init();
-
-    log::set_max_level(LevelFilter::Trace);
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
