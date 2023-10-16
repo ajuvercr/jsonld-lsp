@@ -6,6 +6,7 @@
   "test": "",
   "xsd:test": "Hallo",
   "knows": {
-    "@id": "testing"
+    "@id": "testing",
+    "Address": 42
   }
 }

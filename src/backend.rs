@@ -138,7 +138,7 @@ where
                 // if let Some(r) = offsets_to_range(0, rope.len_chars() - 1, &rope) {
                 return Ok(Some(vec![
                     TextEdit::new(
-                        Range::new(Position::new(0, 0), Position::new(end_line as u32, 0)),
+                        Range::new(Position::new(0, 0), Position::new(end_line as u32 + 1, 0)),
                         t,
                     ),
                     // TextEdit::new(Range::new(Position::new(0, 0), Position::new(0, 0)), t),
