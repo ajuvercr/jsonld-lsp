@@ -50,4 +50,7 @@ extern "C" {
 
     #[wasm_bindgen(typescript_type = "SetLoggerFn")]
     pub type SetLoggerFn;
+
+    #[wasm_bindgen(typescript_type = "DocumentFormattingParams")]
+    pub type DocumentFormattingParams;
 }

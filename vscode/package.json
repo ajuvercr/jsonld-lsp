@@ -5,7 +5,7 @@
 	"description": "A language server and language definition for JSON-LD",
 	"author": "Microsoft Corporation",
 	"license": "MIT",
-	"version": "0.0.6",
+	"version": "0.0.7",
 	"repository": "https://github.com/ajuvercr/jsonld-lsp/",
 	"categories": [
 		"Other"

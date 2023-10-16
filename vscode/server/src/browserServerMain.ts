@@ -46,6 +46,10 @@ connection.languages.semanticTokens.on(async (params: SemanticTokensParams) => {
 	return await server?.semantic_tokens_full(params);
 });
 
+connection.onDocumentFormatting(async change => {
+	return await server?.formatting(change);
+});
+
 connection.onDidChangeTextDocument(async change => {
 	await server?.did_change(change);
 });

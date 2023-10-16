@@ -1,4 +1,4 @@
-use crate::{backend::Client, lsp_types::*, utils::web_types as wt, lang::jsonld::JsonLd};
+use crate::{backend::Client, lang::jsonld::JsonLd, lsp_types::*, utils::web_types as wt};
 use serde::Serializer;
 use serde_json::json;
 use tower_lsp::LanguageServer;
@@ -170,6 +170,6 @@ impl WebBackend {
     }
 }
 
-gen!(initialize wt::InitializeParams prepare_rename wt::PrepareRenameParams  rename wt::RenameParams semantic_tokens_full wt::SemanticTokensParams completion wt::CompletionParams);
+gen!(initialize wt::InitializeParams prepare_rename wt::PrepareRenameParams  rename wt::RenameParams semantic_tokens_full wt::SemanticTokensParams completion wt::CompletionParams formatting wt::DocumentFormattingParams );
 
 gen2!(did_open  wt::DidOpenTextDocumentParams did_change wt::DidChangeTextDocumentParams did_save wt::DidSaveTextDocumentParams);
