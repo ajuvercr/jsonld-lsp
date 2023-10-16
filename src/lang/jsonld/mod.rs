@@ -1,5 +1,5 @@
 use core::fmt;
-use std::{ops::Range, str::FromStr, sync::Arc};
+use std::{io::Cursor, ops::Range, str::FromStr, sync::Arc};
 
 use chumsky::prelude::Simple;
 use futures::lock::Mutex;
@@ -8,27 +8,30 @@ use iref::IriBuf;
 use json_ld::{ContextLoader, ExtractContext};
 use json_ld_syntax::context::{AnyValueMut, Value};
 use locspan::Span;
-use lsp_types::{CompletionItemKind, SemanticToken, SemanticTokenType};
+use lsp_types::{CompletionItemKind, Position, SemanticToken, SemanticTokenType};
 use ropey::Rope;
+use tracing::debug;
 
 use crate::{
-    contexts::filter_definition, model::Spanned, parent::ParentingSystem,
-    semantics::semantic_tokens, utils::ReqwestLoader,
+    contexts::filter_definition,
+    model::Spanned,
+    parent::ParentingSystem,
+    semantics::semantic_tokens,
+    utils::{position_to_offset, ReqwestLoader},
 };
 
 use self::{
     parent::JsonNode,
-    parser::Json,
+    parser::{Json, JsonFormatter},
     tokenizer::{tokenize, JsonToken},
 };
 
-use super::{Lang, LangState, Node, SimpleCompletion};
+use super::{CurrentLangState, Lang, LangState, Node, SimpleCompletion};
 
 pub mod parent;
 pub mod parser;
 pub mod tokenizer;
 
-type Parents = ParentingSystem<Spanned<<JsonLd as Lang>::Node>>;
 pub type Cache = Arc<Mutex<HashMap<String, Value<Span>>>>;
 
 async fn load_ctx(cache: &Cache, id: &str) -> Value<Span> {
@@ -71,26 +74,20 @@ async fn set_ctx(cache: &Cache, id: &str, json: String) {
 pub struct JsonLd {
     id: String,
     cache: Cache,
-    parents: Parents,
     rope: Rope,
 }
+
 impl fmt::Debug for JsonLd {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let bytes = self.parents.to_json_vec().unwrap();
-        let json = unsafe { std::str::from_utf8_unchecked(&bytes) };
-
-        write!(f, "JsonLd {{ id: {}, json: {} }}", self.id, json)
+        write!(f, "JsonLd {{ id: {}, json: {} }}", self.id, self.rope)
     }
 }
 
 impl JsonLd {
     fn new(id: String, cache: Cache) -> Self {
-        let parents = parent::system(Spanned(Json::Token(JsonToken::Null), 0..0));
-
         Self {
             id,
             cache,
-            parents,
             rope: Rope::from(""),
         }
     }
@@ -136,6 +133,25 @@ impl Lang for JsonLd {
     ];
 
     #[tracing::instrument(skip(self), fields(id=self.id))]
+    fn format(
+        &mut self,
+        state: &CurrentLangState<Self>,
+        options: lsp_types::FormattingOptions,
+    ) -> Option<String> {
+        if !state.element.last_is_valid() {
+            return None;
+        }
+        let mut indent = String::new();
+        for _ in 0..options.tab_size {
+            indent += " ";
+        }
+        let mut formatter = JsonFormatter { indent, inc: 0 };
+        let mut cursor = Cursor::new(Vec::new());
+        formatter.format(&state.element.current, &mut cursor).ok()?;
+        String::from_utf8(cursor.into_inner()).ok()
+    }
+
+    #[tracing::instrument(skip(self), fields(id=self.id))]
     fn tokenize(&mut self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>) {
         self.rope = Rope::from(source.to_owned());
         tokenize(source)
@@ -151,25 +167,28 @@ impl Lang for JsonLd {
     }
 
     fn parents(&self, element: &Spanned<Self::Element>) -> ParentingSystem<Spanned<Self::Node>> {
+        debug!("generating parents");
         parent::system(element.clone())
     }
 
-    #[tracing::instrument(skip(self, apply), fields(id=self.id))]
+    #[tracing::instrument(skip(self, state, apply), fields(id=self.id))]
     fn special_semantic_tokens(
         &self,
+        state: &CurrentLangState<Self>,
         mut apply: impl FnMut(Range<usize>, lsp_types::SemanticTokenType) -> (),
     ) {
-        self.parents
+        let parents = &state.parents.last_valid;
+        parents
             .iter()
             .flat_map(|(_, x)| x.as_kv())
             .filter(|(ref x, _)| x.value() == "@id")
-            .map(|(_, id)| &self.parents[*id])
+            .map(|(_, id)| &parents[*id])
             .filter(|x| x.is_leaf())
             .map(|x| x.clone().map(|x| x.into_leaf()))
             .filter(|x| x.is_string())
             .for_each(|x| apply(x.span().clone(), SemanticTokenType::VARIABLE));
 
-        self.parents
+        parents
             .iter()
             .filter(|(_, x)| x.is_kv())
             .map(|(_, x)| x.to_kv())
@@ -182,40 +201,43 @@ impl Lang for JsonLd {
             });
     }
 
-    #[tracing::instrument(skip(self), fields(id=self.id))]
+    #[tracing::instrument(skip(self, state), fields(id=self.id))]
     fn prepare_rename(
         &self,
+        state: &CurrentLangState<Self>,
         pos: usize,
     ) -> Result<(std::ops::Range<usize>, String), Self::PrepareRenameError> {
-        self.parents
+        let parents = &state.parents.last_valid;
+        parents
             .iter()
             .map(|(_, x)| x)
             .filter(|x| x.is_kv())
             .map(|x| x.value().clone().into_kv())
             .filter(|(x, _)| x.value() == "@id")
-            .map(|(_, id)| &self.parents[id])
+            .map(|(_, id)| &parents[id])
             .filter(|x| x.span().contains(&pos))
             .filter_map(|x| x.as_leaf().map(|y| (x.span().clone(), y)))
             .find_map(|(range, x)| x.as_string().cloned().map(|x| (range, x)))
             .ok_or(())
     }
 
-    #[tracing::instrument(skip(self), fields(id=self.id))]
+    #[tracing::instrument(skip(self, state), fields(id=self.id))]
     fn rename(
         &self,
+        state: &CurrentLangState<Self>,
         pos: usize,
         new_name: String,
     ) -> Result<Vec<(std::ops::Range<usize>, String)>, Self::RenameError> {
-        let (_, name) = self.prepare_rename(pos)?;
+        let (_, name) = self.prepare_rename(state, pos)?;
+        let parents = &state.parents.last_valid;
 
-        Ok(self
-            .parents
+        Ok(parents
             .iter()
             .map(|(_, x)| x)
             .filter(|x| x.is_kv())
             .map(|x| x.value().clone().into_kv())
             .filter(|(x, _)| x.value() == "@id")
-            .map(|(_, id)| &self.parents[id])
+            .map(|(_, id)| &parents[id])
             .filter_map(|x| x.as_leaf().map(|y| (x.span().clone(), y)))
             .filter_map(|(range, x)| x.as_string().cloned().map(|x| (range, x)))
             .filter(|(_, x)| x == &name)
@@ -223,35 +245,51 @@ impl Lang for JsonLd {
             .collect())
     }
 
-    fn new(id: String, cache: Cache) -> Self {
-        Self::new(id, cache)
+    fn new(id: String, cache: Cache) -> (Self, CurrentLangState<Self>) {
+        (Self::new(id, cache), Default::default())
     }
 }
 
 #[async_trait::async_trait]
 impl LangState for JsonLd {
-    #[tracing::instrument(skip(self, parents), fields(id=self.id))]
-    async fn update(&mut self, parents: ParentingSystem<Spanned<<JsonLd as Lang>::Node>>) {
-        self.parents = parents;
-        if let Ok(bytes) = self.parents.to_json_vec() {
-            let st = String::from_utf8(bytes).unwrap();
-            set_ctx(&self.cache, &self.id, st).await;
-            // self.loader
-            //     .lock()
-            //     .unwrap()
-            //     .set_document(IriBuf::from_str(&self.id).unwrap(), bytes);
+    #[tracing::instrument(skip(self, state), fields(id=self.id))]
+    async fn update(&mut self, state: &CurrentLangState<Self>) {
+        debug!("update parents");
+
+        if state.parents.last_is_valid() {
+            if let Ok(bytes) = state.parents.last_valid.to_json_vec() {
+                let st = String::from_utf8(bytes).unwrap();
+                set_ctx(&self.cache, &self.id, st).await;
+            }
         }
     }
 
-    #[tracing::instrument(skip(self), fields(id=self.id))]
-    async fn do_semantic_tokens(&mut self) -> Vec<SemanticToken> {
-        semantic_tokens(self, &self.parents, &self.rope)
+    #[tracing::instrument(skip(self, state), fields(id=self.id))]
+    async fn do_semantic_tokens(&mut self, state: &CurrentLangState<Self>) -> Vec<SemanticToken> {
+        semantic_tokens(self, &state, &self.rope)
     }
 
-    #[tracing::instrument(skip(self), fields(id=self.id))]
-    async fn do_completion(&mut self, trigger: Option<String>) -> Vec<super::SimpleCompletion> {
+    #[tracing::instrument(skip(self, state), fields(id=self.id))]
+    async fn do_completion(
+        &mut self,
+        trigger: Option<String>,
+        position: &Position,
+        state: &CurrentLangState<Self>,
+    ) -> Vec<super::SimpleCompletion> {
+        let parents = &state.parents.last_valid;
+        let location = position_to_offset(position.clone(), &self.rope).unwrap();
+
+        let closest_pref = state
+            .tokens
+            .current
+            .iter()
+            .filter(|x| x.1.start < location && !x.1.contains(&location))
+            .min_by_key(|x| location - x.1.start);
+
+        debug!(%location, ?closest_pref);
+
         if trigger == Some("@".to_string()) {
-            self.get_ids()
+            self.get_ids(&state)
                 .into_iter()
                 .map(|x| {
                     let w = Some(format!("@{x}"));
@@ -267,17 +305,22 @@ impl LangState for JsonLd {
                 })
                 .collect()
         } else {
+            if !closest_pref
+                .map(|x| x.0 == JsonToken::Comma)
+                .unwrap_or_default()
+            {
+                return Vec::new();
+            }
+
             let iri = IriBuf::from_str(&self.id).unwrap();
             let mut x = load_ctx(&self.cache, &self.id).await;
 
-            let context_ids: Vec<_> = self
-                .parents
+            let context_ids: Vec<_> = parents
                 .iter()
                 .map(|(_, x)| x)
-                .filter(|x| x.is_kv())
-                .map(|x| x.value().clone().into_kv())
+                .filter_map(|x| x.as_kv())
                 .filter(|(x, _)| x.value() == "@context")
-                .map(|(_, id)| &self.parents[id])
+                .map(|(_, id)| &parents[*id])
                 .flat_map(|x| {
                     if let Some(leaf_st) = x.as_leaf().and_then(|x| x.as_string()) {
                         return vec![leaf_st.clone()];
@@ -285,7 +328,7 @@ impl LangState for JsonLd {
                     if let Some(arr) = x.as_array() {
                         return arr
                             .iter()
-                            .map(|x| &self.parents[*x])
+                            .map(|x| &parents[*x])
                             .flat_map(|x| x.as_leaf())
                             .flat_map(|x| x.as_string())
                             .cloned()
@@ -323,9 +366,9 @@ impl LangState for JsonLd {
 }
 
 impl JsonLd {
-    fn get_ids(&self) -> Vec<String> {
-        let id_indices = self
-            .parents
+    fn get_ids(&self, state: &CurrentLangState<Self>) -> Vec<String> {
+        let parents = &state.parents.current;
+        let id_indices = parents
             .iter()
             .map(|(_, x)| x)
             .flat_map(|x| x.as_kv())
@@ -334,7 +377,7 @@ impl JsonLd {
             .copied();
 
         let ids = id_indices
-            .map(|x| &self.parents[x].0)
+            .map(|x| &parents[x].0)
             .flat_map(|x| x.as_leaf())
             .flat_map(|x| x.as_string())
             .cloned();

@@ -1,8 +1,7 @@
 use crate::{
-    lang::{Lang, Node, Token},
+    lang::{CurrentLangState, Lang, Node, Token},
     lsp_types::{SemanticToken, SemanticTokenType},
-    model::{spanned, Spanned},
-    parent::ParentingSystem,
+    model::spanned,
 };
 use ropey::Rope;
 use tracing::info;
@@ -15,17 +14,19 @@ struct T {
 
 pub fn semantic_tokens<L: Lang>(
     lang: &L,
-    system: &ParentingSystem<Spanned<L::Node>>,
+    state: &CurrentLangState<L>,
     rope: &Rope,
 ) -> Vec<SemanticToken> {
     let mut tokens: Vec<Option<SemanticTokenType>> = Vec::with_capacity(rope.len_chars());
     tokens.resize(rope.len_chars(), None);
 
-    lang.special_semantic_tokens(|token, ty| {
+    lang.special_semantic_tokens(state, |token, ty| {
         token.for_each(|i| tokens[i] = Some(ty.clone()));
     });
 
-    system
+    state
+        .parents
+        .last_valid
         .iter()
         .flat_map(|(_, x)| x.leaf().map(|t| spanned(t, x.span().clone())))
         .flat_map(|s| s.value().token().map(|t| (s.span().clone(), t)))

@@ -4,7 +4,10 @@ use enum_methods::{EnumIntoGetters, EnumIsA, EnumToGetters};
 
 use crate::{model::Spanned, parent::ParentingSystem};
 
-use super::{parser::Json, tokenizer::JsonToken};
+use super::{
+    parser::{Json, ObjectMember},
+    tokenizer::JsonToken,
+};
 
 #[derive(Clone, Debug, PartialEq, EnumIntoGetters, EnumIsA, EnumToGetters)]
 pub enum JsonNode {
@@ -120,12 +123,17 @@ fn add(
         }
         Json::Object(ks) => {
             let mut children = Vec::new();
-            for Spanned((k, v), kv_span) in ks {
-                if let Some(child) = add(v, 0, system) {
-                    let kv = JsonNode::Kv(k, child);
-                    let kv_child = system.add(Spanned(kv, kv_span), 0);
-                    system.set_parent(child, kv_child);
-                    children.push(kv_child);
+            for Spanned(x, kv_span) in ks {
+                match x {
+                    ObjectMember::Full(k, v) => {
+                        if let Some(child) = add(v, 0, system) {
+                            let kv = JsonNode::Kv(k.map(|x| x.into_string()), child);
+                            let kv_child = system.add(Spanned(kv, kv_span), 0);
+                            system.set_parent(child, kv_child);
+                            children.push(kv_child);
+                        }
+                    }
+                    _ => {}
                 }
             }
 

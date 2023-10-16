@@ -7,6 +7,14 @@ use enum_methods::{EnumIntoGetters, EnumIsA, EnumToGetters};
 
 #[derive(Debug, Clone)]
 pub struct Spanned<T>(pub T, pub Range<usize>);
+impl<T> Default for Spanned<T>
+where
+    T: Default,
+{
+    fn default() -> Self {
+        Self(T::default(), 0..1)
+    }
+}
 impl<T> Spanned<T> {
     pub fn map<O>(self, f: impl Fn(T) -> O) -> Spanned<O> {
         let v = f(self.0);
@@ -15,6 +23,9 @@ impl<T> Spanned<T> {
     pub fn map_ref<'a, O: 'a>(&'a self, f: impl Fn(&'a T) -> O) -> Spanned<O> {
         let v = f(&self.0);
         Spanned(v, self.1.clone())
+    }
+    pub fn as_ref<'a>(&'a self) -> Spanned<&'a T> {
+        Spanned(&self.0, self.1.clone())
     }
 }
 impl<T> Spanned<Option<T>> {
