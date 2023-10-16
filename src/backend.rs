@@ -1,4 +1,4 @@
-use crate::lang::{Lang, LangState, SimpleCompletion};
+use crate::lang::{CurrentLangState, Lang, LangState, SimpleCompletion};
 use crate::lsp_types::*;
 
 use crate::utils::{offset_to_position, offsets_to_range, position_to_offset};
@@ -45,7 +45,7 @@ pub struct Backend<C: Client, L: LangState> {
     pub client: C,
 
     cache: L::State,
-    langs: Arc<Mutex<HashMap<String, L>>>,
+    langs: Arc<Mutex<HashMap<String, (L, CurrentLangState<L>)>>>,
     ropes: Mutex<HashMap<String, Rope>>,
 }
 
@@ -132,8 +132,8 @@ where
             return Ok(None);
         }
 
-        if let Some(lang) = langs.get_mut(uri.as_str()) {
-            if let Some(t) = lang.format(params.options) {
+        if let Some((ref mut lang, ref mut state)) = langs.get_mut(uri.as_str()) {
+            if let Some(t) = lang.format(state, params.options) {
                 let end_line = rope.char_to_line(rope.len_chars());
                 // if let Some(r) = offsets_to_range(0, rope.len_chars() - 1, &rope) {
                 return Ok(Some(vec![
@@ -169,11 +169,11 @@ where
         };
 
         let mut langs = self.langs.lock().await;
-        if let Some(lang) = langs.get_mut(uri.as_str()) {
+        if let Some((ref mut lang, ref state)) = langs.get_mut(uri.as_str()) {
             let pos =
                 position_to_offset(loc, &rope).ok_or(Error::new(ErrorCode::InvalidRequest))?;
 
-            let (span, st) = if let Ok(x) = lang.prepare_rename(pos) {
+            let (span, st) = if let Ok(x) = lang.prepare_rename(state, pos) {
                 x
             } else {
                 return Ok(None);
@@ -208,11 +208,11 @@ where
         };
 
         let mut langs = self.langs.lock().await;
-        if let Some(lang) = langs.get_mut(uri.as_str()) {
+        if let Some((ref mut lang, ref state)) = langs.get_mut(uri.as_str()) {
             let pos =
                 position_to_offset(loc, &rope).ok_or(Error::new(ErrorCode::InvalidRequest))?;
 
-            let changes = if let Ok(x) = lang.rename(pos, new_id) {
+            let changes = if let Ok(x) = lang.rename(state, pos, new_id) {
                 x
             } else {
                 return Ok(None);
@@ -247,8 +247,8 @@ where
         info!("semantic tokens full");
         let uri = params.text_document.uri.as_str();
         let mut langs = self.langs.lock().await;
-        if let Some(lang) = langs.get_mut(uri) {
-            let tokens = lang.do_semantic_tokens().await;
+        if let Some((ref mut lang, ref state)) = langs.get_mut(uri) {
+            let tokens = lang.do_semantic_tokens(state).await;
             return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
                 result_id: None,
                 data: tokens,
@@ -293,7 +293,7 @@ where
             let lang = L::new(id.clone(), self.cache.clone());
             langs.insert(id.clone(), lang);
         }
-        let lang = langs.get_mut(&id).unwrap();
+        let (ref mut lang, ref state) = langs.get_mut(&id).unwrap();
 
         self.client
             .log_message(
@@ -313,7 +313,9 @@ where
             .as_ref()
             .and_then(|x| x.trigger_character.clone());
 
-        let simples = lang.do_completion(ctx).await;
+        let simples = lang
+            .do_completion(ctx, &params.text_document_position.position, state)
+            .await;
 
         self.client
             .log_message(MessageType::INFO, "Got simples!")
@@ -381,9 +383,9 @@ impl<C: Client, L: LangState + Send + Sync> Backend<C, L> {
             langs.insert(id.clone(), lang);
         }
 
-        let lang = langs.get_mut(&id)?;
+        let (ref mut lang, ref mut state) = langs.get_mut(&id)?;
 
-        let errors = lang.update_text(&params.text).await;
+        let errors = lang.update_text(&params.text, state).await;
         let rope = Rope::from_str(&params.text);
 
         let diagnostics = errors

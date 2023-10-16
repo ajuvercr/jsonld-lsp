@@ -1,13 +1,11 @@
-pub mod tokenizer;
-// pub mod parser;
 mod formatter;
 mod model;
 mod node;
 mod parser;
 mod token;
-use lsp_types::{FormattingOptions, SemanticTokenType};
+pub mod tokenizer;
+use lsp_types::{FormattingOptions, Position, SemanticTokenType};
 use std::ops::Range;
-use token::Token;
 
 use chumsky::{prelude::Simple, primitive::end, recovery::skip_then_retry_until, Parser};
 pub use model::*;
@@ -27,7 +25,7 @@ use self::{
     node::{Leaf, Node},
 };
 
-use super::{Lang, LangState};
+use super::{CurrentLangState, Lang, LangState};
 
 pub mod semantic_token {
     use lsp_types::SemanticTokenType as STT;
@@ -35,12 +33,11 @@ pub mod semantic_token {
     pub const LANG_TAG: STT = STT::new("langTag");
 }
 
+#[allow(unused)]
 pub struct TurtleLang {
     id: String,
     rope: Rope,
-    tokens: Vec<Spanned<Token>>,
     comments: Vec<Spanned<String>>,
-    parents: ParentingSystem<Spanned<<Self as Lang>::Node>>,
 }
 
 impl Lang for TurtleLang {
@@ -82,14 +79,19 @@ impl Lang for TurtleLang {
         Some(String::from("*.{ttl,turtle}"))
     }
 
-    fn format(&mut self, options: FormattingOptions) -> Option<String> {
+    fn format(
+        &mut self,
+        state: &CurrentLangState<Self>,
+        options: FormattingOptions,
+    ) -> Option<String> {
         let stream = chumsky::Stream::from_iter(
             0..self.rope.len_chars() + 1,
-            self.tokens
-                .clone()
-                .into_iter()
+            state
+                .tokens
+                .current
+                .iter()
                 .filter(|x| !x.is_comment())
-                .map(|Spanned(x, s)| (x, s)),
+                .map(|Spanned(x, s)| (x.clone(), s.clone())),
         );
 
         let parser = turtle()
@@ -98,10 +100,6 @@ impl Lang for TurtleLang {
 
         let turtle = parser.parse(stream).ok()?;
         format_turtle(&turtle.0, options, &self.comments, &self.rope)
-
-        // let ts: Vec<_> = self.tokens.iter().map(|x| &x.0).collect();
-        // let new = format(&ts, options);
-        // Some(new)
     }
 
     fn tokenize(&mut self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>) {
@@ -115,10 +113,6 @@ impl Lang for TurtleLang {
             .into_iter()
             .map(|(x, y)| spanned(x, y))
             .collect();
-
-        if errs.is_empty() {
-            self.tokens = tokens.clone();
-        }
 
         (tokens, errs)
     }
@@ -157,7 +151,7 @@ impl Lang for TurtleLang {
         )
     }
 
-    fn parents(&self, element: &Spanned<Self::Element>) -> ParentingSystem<Spanned<Self::Node>> {
+    fn parents(&self, _element: &Spanned<Self::Element>) -> ParentingSystem<Spanned<Self::Node>> {
         ParentingSystem::new()
         // let p = ParentingSystem::new_turtle(element.clone());
         //
@@ -166,10 +160,11 @@ impl Lang for TurtleLang {
 
     fn special_semantic_tokens(
         &self,
+        state: &CurrentLangState<Self>,
         mut apply: impl FnMut(Range<usize>, lsp_types::SemanticTokenType) -> (),
     ) {
         use lang::Token;
-        self.tokens.iter().for_each(|token| {
+        state.tokens.current.iter().for_each(|token| {
             Token::span_tokens(token)
                 .into_iter()
                 .for_each(|(token, span)| apply(span, token))
@@ -178,41 +173,50 @@ impl Lang for TurtleLang {
 
     fn prepare_rename(
         &self,
-        pos: usize,
+        _state: &CurrentLangState<Self>,
+        _pos: usize,
     ) -> Result<(Range<usize>, String), Self::PrepareRenameError> {
         Err(())
     }
 
     fn rename(
         &self,
-        pos: usize,
-        new_name: String,
+        _state: &CurrentLangState<Self>,
+        _pos: usize,
+        _new_name: String,
     ) -> Result<Vec<(Range<usize>, String)>, Self::RenameError> {
         Err(())
     }
 
-    fn new(id: String, state: Self::State) -> Self {
-        TurtleLang {
-            id,
-            tokens: Vec::new(),
-            rope: Rope::new(),
-            comments: Vec::new(),
-            parents: ParentingSystem::new(),
-        }
+    fn new(id: String, _state: Self::State) -> (Self, CurrentLangState<Self>) {
+        (
+            TurtleLang {
+                id,
+                rope: Rope::new(),
+                comments: Vec::new(),
+            },
+            Default::default(),
+        )
     }
 }
 
 #[async_trait::async_trait]
 impl LangState for TurtleLang {
-    async fn update(&mut self, parents: ParentingSystem<Spanned<<TurtleLang as Lang>::Node>>) {
-        self.parents = parents;
+    async fn update(&mut self, _state: &CurrentLangState<Self>) {}
+
+    async fn do_semantic_tokens(
+        &mut self,
+        state: &CurrentLangState<Self>,
+    ) -> Vec<lsp_types::SemanticToken> {
+        semantic_tokens(self, state, &self.rope)
     }
 
-    async fn do_semantic_tokens(&mut self) -> Vec<lsp_types::SemanticToken> {
-        semantic_tokens(self, &self.parents, &self.rope)
-    }
-
-    async fn do_completion(&mut self, trigger: Option<String>) -> Vec<super::SimpleCompletion> {
+    async fn do_completion(
+        &mut self,
+        _trigger: Option<String>,
+        _position: &Position,
+        _state: &CurrentLangState<Self>,
+    ) -> Vec<super::SimpleCompletion> {
         Vec::new()
     }
 }

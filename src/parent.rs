@@ -5,11 +5,21 @@ pub trait ParentElement {
     fn iter(&self) -> Self::I;
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct ParentingSystem<E> {
     pub objects: Vec<E>,
     parents: Vec<usize>,
     pub start: Option<usize>,
+}
+
+impl<E> Default for ParentingSystem<E> {
+    fn default() -> Self {
+        Self {
+            objects: Vec::new(),
+            parents: Vec::new(),
+            start: None,
+        }
+    }
 }
 
 impl<E> ParentingSystem<E> {

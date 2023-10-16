@@ -1,7 +1,10 @@
-use std::{fmt::Display, hash::Hash, ops::Range};
+use std::{fmt::Display, hash::Hash, ops::Range, sync::Arc};
 
 use chumsky::prelude::Simple;
-use lsp_types::{CompletionItemKind, FormattingOptions, SemanticToken, SemanticTokenType};
+use lsp_types::{
+    CompletionItemKind, FormattingOptions, Position, SemanticToken, SemanticTokenType,
+};
+use tracing::debug;
 
 use crate::{model::Spanned, parent::ParentingSystem};
 
@@ -80,16 +83,57 @@ impl<T> Node<T> for () {
     }
 }
 
-pub trait Lang {
+#[derive(Clone, Debug)]
+pub struct CurrentLangStatePart<E> {
+    pub last_valid: Arc<E>,
+    pub current: Arc<E>,
+}
+impl<E: Default> Default for CurrentLangStatePart<E> {
+    fn default() -> Self {
+        let current: Arc<E> = Default::default();
+        Self {
+            last_valid: current.clone(),
+            current,
+        }
+    }
+}
+
+impl<T> CurrentLangStatePart<T> {
+    pub fn last_is_valid(&self) -> bool {
+        Arc::ptr_eq(&self.last_valid, &self.current)
+    }
+}
+
+#[derive(Debug)]
+pub struct CurrentLangState<L: Lang> {
+    pub tokens: CurrentLangStatePart<Vec<Spanned<L::Token>>>,
+    pub element: CurrentLangStatePart<Spanned<L::Element>>,
+    pub parents: CurrentLangStatePart<ParentingSystem<Spanned<L::Node>>>,
+}
+
+impl<L: Lang> Default for CurrentLangState<L>
+where
+    L::Element: Default,
+{
+    fn default() -> Self {
+        Self {
+            tokens: Default::default(),
+            element: Default::default(),
+            parents: Default::default(),
+        }
+    }
+}
+
+pub trait Lang: Sized {
     type State: Clone;
 
     /// Type of tokens after tokenization
     type Token: PartialEq + Hash + Clone + Send + Sync;
-    type TokenError: Into<SimpleDiagnostic> + Send + Sync;
+    type TokenError: Into<SimpleDiagnostic> + Send + Sync + std::fmt::Debug;
 
     /// Type of Element inside a ParentingSystem
     type Element: Send + Sync;
-    type ElementError: Into<SimpleDiagnostic> + Send + Sync;
+    type ElementError: Into<SimpleDiagnostic> + Send + Sync + std::fmt::Debug;
 
     type RenameError: Send + Sync;
     type PrepareRenameError: Send + Sync;
@@ -105,7 +149,11 @@ pub trait Lang {
         None
     }
 
-    fn format(&mut self, options: FormattingOptions) -> Option<String> {
+    fn format(
+        &mut self,
+        _state: &CurrentLangState<Self>,
+        _options: FormattingOptions,
+    ) -> Option<String> {
         None
     }
 
@@ -117,20 +165,26 @@ pub trait Lang {
     ) -> (Spanned<Self::Element>, Vec<Self::ElementError>);
     fn parents(&self, element: &Spanned<Self::Element>) -> ParentingSystem<Spanned<Self::Node>>;
 
-    fn special_semantic_tokens(&self, apply: impl FnMut(Range<usize>, SemanticTokenType) -> ());
+    fn special_semantic_tokens(
+        &self,
+        state: &CurrentLangState<Self>,
+        apply: impl FnMut(Range<usize>, SemanticTokenType) -> (),
+    );
 
     fn prepare_rename(
         &self,
+        state: &CurrentLangState<Self>,
         pos: usize,
     ) -> Result<(std::ops::Range<usize>, String), Self::PrepareRenameError>;
 
     fn rename(
         &self,
+        state: &CurrentLangState<Self>,
         pos: usize,
         new_name: String,
     ) -> Result<Vec<(std::ops::Range<usize>, String)>, Self::RenameError>;
 
-    fn new(id: String, state: Self::State) -> Self;
+    fn new(id: String, state: Self::State) -> (Self, CurrentLangState<Self>);
 }
 
 #[async_trait::async_trait]
@@ -138,28 +192,55 @@ pub trait LangState: Lang
 where
     Self: Sized,
 {
-    async fn update(&mut self, parents: ParentingSystem<Spanned<Self::Node>>);
+    async fn update(&mut self, parents: &CurrentLangState<Self>);
 
-    async fn do_semantic_tokens(&mut self) -> Vec<SemanticToken>;
+    async fn do_semantic_tokens(&mut self, state: &CurrentLangState<Self>) -> Vec<SemanticToken>;
 
-    async fn update_text(&mut self, source: &str) -> Vec<SimpleDiagnostic> {
-        let (tokens, errors) = self.tokenize(source);
+    async fn update_text(
+        &mut self,
+        source: &str,
+        state: &mut CurrentLangState<Self>,
+    ) -> Vec<SimpleDiagnostic> {
+        let (tokens, token_errors) = self.tokenize(source);
+        debug!( token_errors = ?token_errors);
 
-        if !errors.is_empty() {
-            return errors.into_iter().map(|x| x.into()).collect();
+        let tokens = Arc::new(tokens);
+
+        state.tokens.current = tokens.clone();
+        let (elements, parse_errors) = self.parse(source, &tokens);
+        if token_errors.is_empty() {
+            state.tokens.last_valid = tokens;
         }
 
-        let (elements, errors) = self.parse(source, &tokens);
+        debug!( parse_errors = ?parse_errors);
 
-        if !errors.is_empty() {
-            return errors.into_iter().map(|x| x.into()).collect();
-        }
+        let elements = Arc::new(elements);
+        state.element.current = elements.clone();
         let parenting = self.parents(&elements);
+        if token_errors.is_empty() && parse_errors.is_empty() {
+            state.element.last_valid = elements;
+        }
 
-        self.update(parenting).await;
+        let parenting = Arc::new(parenting);
 
-        Vec::new()
+        state.parents.current = parenting.clone();
+        if token_errors.is_empty() && parse_errors.is_empty() {
+            state.parents.last_valid = parenting.clone();
+        }
+
+        self.update(&state).await;
+
+        token_errors
+            .into_iter()
+            .map(|x| x.into())
+            .chain(parse_errors.into_iter().map(|x| x.into()))
+            .collect()
     }
 
-    async fn do_completion(&mut self, trigger: Option<String>) -> Vec<SimpleCompletion>;
+    async fn do_completion(
+        &mut self,
+        trigger: Option<String>,
+        position: &Position,
+        state: &CurrentLangState<Self>,
+    ) -> Vec<SimpleCompletion>;
 }
