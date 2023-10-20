@@ -46,7 +46,6 @@ pub enum Token {
     IRIRef(String),
 
     /// ..:
-    PNameNS(Option<String>),
     PNameLN(Option<String>, String),
     /// _:...
     BlankNodeLabel(String),
@@ -60,6 +59,8 @@ pub enum Token {
     /// [ ]
     ANON,
     Comment(String),
+
+    Invalid(String),
 }
 
 impl lang::Token for Token {
@@ -75,7 +76,6 @@ impl lang::Token for Token {
             Token::LangTag(_) => Some(semantic_token::LANG_TAG),
             Token::Number(_) => Some(lsp_types::SemanticTokenType::NUMBER),
             Token::Str(_, _) => Some(lsp_types::SemanticTokenType::STRING),
-            Token::PNameNS(_) => Some(lsp_types::SemanticTokenType::NAMESPACE),
             Token::Comment(_) => Some(lsp_types::SemanticTokenType::COMMENT),
             _ => None,
         }
@@ -156,7 +156,6 @@ impl std::fmt::Display for Token {
             Token::True => write!(f, "'true'"),
             Token::False => write!(f, "'false'"),
             Token::IRIRef(_) => write!(f, "a named node"),
-            Token::PNameNS(_) => write!(f, "a prefix"),
             Token::PNameLN(_, _) => write!(f, "a prefixed node"),
             Token::BlankNodeLabel(_) => write!(f, "a blank node"),
             Token::LangTag(_) => write!(f, "a language tag"),
@@ -164,6 +163,7 @@ impl std::fmt::Display for Token {
             Token::Str(_, _) => write!(f, "a string"),
             Token::ANON => write!(f, "an inline blank node"),
             Token::Comment(_) => write!(f, "a comment"),
+            Token::Invalid(_) => write!(f, "invalid token"),
         }
     }
 }

@@ -9,6 +9,12 @@ pub mod web_types;
 use crate::lsp_types::{Position, Range};
 use ropey::Rope;
 
+pub fn range_to_range(range: &std::ops::Range<usize>, rope: &Rope) -> Option<Range> {
+    let start = offset_to_position(range.start, rope)?;
+    let end = offset_to_position(range.end, rope)?;
+    Range::new(start, end).into()
+}
+
 pub fn offset_to_position(offset: usize, rope: &Rope) -> Option<Position> {
     let line = rope.try_char_to_line(offset).ok()?;
     let first_char = rope.try_line_to_char(line).ok()?;

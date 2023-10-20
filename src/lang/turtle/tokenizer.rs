@@ -48,6 +48,14 @@ fn comment() -> t!(Token) {
         .map(|x| Token::Comment(x))
 }
 
+fn invalid() -> t!(Token) {
+    none_of(" \n\r")
+        .repeated()
+        .at_least(1)
+        .collect()
+        .map(Token::Invalid)
+}
+
 fn iri_ref() -> t!(Token) {
     let letter = none_of("<>\"{}|^`\\").repeated().at_least(1).or(uchar());
 
@@ -69,7 +77,7 @@ fn pname_ns() -> t!(Token) {
             if let Some(local) = local {
                 Token::PNameLN(x, local)
             } else {
-                Token::PNameNS(x)
+                Token::PNameLN(x, String::new())
             }
         })
 }
@@ -352,6 +360,7 @@ pub fn parse_token() -> t!(Token) {
         strings(),
         tokens(),
     ))
+    .recover_with(skip_parser(invalid()))
 }
 
 pub fn parse_tokens() -> t!(Vec<(Token, Range<usize>)>) {
@@ -505,5 +514,19 @@ mod tests {
         let (tok, err) = parse_tokens().parse_recovery(input);
         assert!(tok.is_some());
         assert!(err.is_empty());
+    }
+
+    #[test]
+    fn parse_invalid() {
+        let input = "
+            @prefix elm: http .
+            ";
+
+        let (tok, err) = parse_tokens().parse_recovery(input);
+        assert!(tok.is_some());
+
+        println!("tokens {:?}", tok);
+        assert_eq!(tok.unwrap().len(), 4);
+        assert_eq!(err.len(), 1);
     }
 }

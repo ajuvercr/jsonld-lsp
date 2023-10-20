@@ -4,8 +4,11 @@ mod node;
 mod parser;
 mod token;
 pub mod tokenizer;
-use lsp_types::{FormattingOptions, Position, SemanticTokenType};
+use lsp_types::{
+    CompletionItemKind, Documentation, FormattingOptions, Position, SemanticTokenType,
+};
 use std::ops::Range;
+use tracing::info;
 
 use chumsky::{prelude::Simple, primitive::end, recovery::skip_then_retry_until, Parser};
 pub use model::*;
@@ -14,18 +17,21 @@ pub use parser::*;
 use ropey::Rope;
 
 use crate::{
-    lang,
+    lang::{self, head},
     model::{spanned, Spanned},
     parent::ParentingSystem,
+    prefix::Prefixes,
     semantics::semantic_tokens,
+    utils::{position_to_offset, range_to_range},
 };
 
 use self::{
     formatter::format_turtle,
     node::{Leaf, Node},
+    token::Token,
 };
 
-use super::{CurrentLangState, Lang, LangState};
+use super::{CurrentLangState, Lang, LangState, SimpleCompletion};
 
 pub mod semantic_token {
     use lsp_types::SemanticTokenType as STT;
@@ -38,10 +44,11 @@ pub struct TurtleLang {
     id: String,
     rope: Rope,
     comments: Vec<Spanned<String>>,
+    prefixes: Prefixes,
 }
 
 impl Lang for TurtleLang {
-    type State = ();
+    type State = Prefixes;
 
     type Token = token::Token;
 
@@ -60,7 +67,7 @@ impl Lang for TurtleLang {
 
     const LANG: &'static str = "turtle";
 
-    const TRIGGERS: &'static [&'static str] = &[];
+    const TRIGGERS: &'static [&'static str] = &[":"];
 
     const LEGEND_TYPES: &'static [lsp_types::SemanticTokenType] = &[
         semantic_token::BOOLEAN,
@@ -143,7 +150,11 @@ impl Lang for TurtleLang {
         let parser = turtle()
             .map_with_span(spanned)
             .then_ignore(end().recover_with(skip_then_retry_until([])));
+
         let (json, json_errors) = parser.parse_recovery(stream);
+        if let Some(ttl) = &json {
+            info!("triples {}", ttl.triples.len())
+        }
 
         (
             json.unwrap_or(Spanned(Default::default(), 0..source.len())),
@@ -188,12 +199,13 @@ impl Lang for TurtleLang {
         Err(())
     }
 
-    fn new(id: String, _state: Self::State) -> (Self, CurrentLangState<Self>) {
+    fn new(id: String, state: Self::State) -> (Self, CurrentLangState<Self>) {
         (
             TurtleLang {
                 id,
                 rope: Rope::new(),
                 comments: Vec::new(),
+                prefixes: state.clone(),
             },
             Default::default(),
         )
@@ -214,9 +226,106 @@ impl LangState for TurtleLang {
     async fn do_completion(
         &mut self,
         _trigger: Option<String>,
-        _position: &Position,
-        _state: &CurrentLangState<Self>,
+        position: &Position,
+        state: &CurrentLangState<Self>,
     ) -> Vec<super::SimpleCompletion> {
+        let location = position_to_offset(position.clone(), &self.rope).unwrap() - 1;
+
+        info!("Completion on location {}", location);
+        if let Some(token) = state
+            .tokens
+            .current
+            .iter()
+            .find(|x| x.1.contains(&location))
+        {
+            info!("For token {:?}", token);
+            if let Spanned(Token::Invalid(_), range) = &token {
+                let range = range_to_range(range, &self.rope).unwrap_or_default();
+
+                return self
+                    .prefixes
+                    .get_all()
+                    .map(|key| {
+                        let url = self
+                            .prefixes
+                            .get(key)
+                            .map(|x| x.to_string())
+                            .unwrap_or_default();
+
+                        let mut edits = vec![lsp_types::TextEdit {
+                            new_text: format!("{}:", key),
+                            range,
+                        }];
+
+                        if state
+                            .element
+                            .last_valid
+                            .prefixes
+                            .iter()
+                            .find(|x| x.prefix.as_str() == key)
+                            .is_none()
+                        {
+                            edits.push(lsp_types::TextEdit {
+                                new_text: format!("@prefix {}: <{}>.\n", key, url),
+                                range: head(),
+                            });
+                        }
+
+                        SimpleCompletion {
+                            kind: CompletionItemKind::MODULE,
+                            label: format!("{}", key),
+                            documentation: Some(url.clone()),
+                            sort_text: None,
+                            filter_text: None,
+                            edits,
+                        }
+                    })
+                    .collect();
+            }
+
+            if let Spanned(Token::PNameLN(prefix, _), range) = &token {
+                let mut out = Vec::new();
+                let range = range_to_range(range, &self.rope).unwrap_or_default();
+
+                let prefix_str = prefix.as_ref().map(|x| x.as_str()).unwrap_or("");
+                info!("Range {:?}", range);
+                self.prefixes
+                    .fetch(prefix_str, |props| {
+                        info!("Properties {}", props.len());
+                        for prop in props {
+                            let new_text = format!("{}:{}", prefix_str, prop.short);
+                            let edits = vec![lsp_types::TextEdit {
+                                new_text,
+                                range: range.clone(),
+                            }];
+                            let label = format!("{}: {}", prop.short, prop.id);
+                            let documentation = match (&prop.comment, &prop.label) {
+                                (Some(comment), Some(label)) => {
+                                    Some(format!("{}\n{}", label, comment))
+                                }
+                                (None, Some(label)) => Some(format!("{}", label)),
+                                (Some(comment), None) => Some(format!("{}", comment)),
+                                (None, None) => None,
+                            };
+
+                            out.push(SimpleCompletion {
+                                kind: prop.ty.into(),
+                                label,
+                                documentation,
+                                sort_text: None,
+                                filter_text: None,
+                                edits,
+                            })
+                        }
+                    })
+                    .await;
+
+                info!("Returning {} suggestions", out.len());
+
+                return out;
+            }
+        }
+
         Vec::new()
     }
 }

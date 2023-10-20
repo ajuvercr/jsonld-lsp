@@ -321,38 +321,7 @@ where
             .log_message(MessageType::INFO, "Got simples!")
             .await;
 
-        let end = params.text_document_position.position;
-        // end.character += 1;
-        let start = Position::new(end.line, end.character - 1);
-        let range = Range::new(start, end);
-
-        let completions = simples
-            .into_iter()
-            .map(
-                |SimpleCompletion {
-                     filter_text,
-                     sort_text,
-                     label,
-                     documentation,
-                     kind,
-                     edit,
-                 }| {
-                    CompletionItem {
-                        label,
-                        kind: Some(kind),
-                        sort_text,
-                        filter_text,
-                        documentation: documentation.map(|st| Documentation::String(st)),
-                        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                            range,
-                            new_text: edit,
-                        })),
-                        ..Default::default()
-                    }
-                },
-            )
-            .collect();
-
+        let completions = simples.into_iter().map(|x| x.into()).collect();
         Ok(Some(CompletionResponse::Array(completions)))
     }
 }

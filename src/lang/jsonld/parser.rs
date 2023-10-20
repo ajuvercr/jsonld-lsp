@@ -11,7 +11,7 @@ use super::tokenizer::JsonToken;
 pub enum ObjectMember {
     Full(Spanned<JsonToken>, Spanned<Json>),
     Partial(
-        Option<Spanned<JsonToken>>,
+        Spanned<JsonToken>,
         Option<Spanned<()>>,
         Option<Spanned<Json>>,
     ),
@@ -126,9 +126,7 @@ impl<'a> Iterator for JsonIter<'a> {
                                 }
 
                                 ObjectMember::Partial(ref x, _, ref s) => {
-                                    if let Some(x) = x {
-                                        self.stack.push(Err(x.as_ref()));
-                                    }
+                                    self.stack.push(Err(x.as_ref()));
                                     if let Some(s) = s {
                                         self.stack.push(Ok(s));
                                     }
@@ -191,21 +189,18 @@ fn parser() -> impl Parser<JsonToken, Spanned<Json>, Error = Simple<JsonToken>> 
 
         let member = filter(JsonToken::is_string)
             .map_with_span(spanned)
-            .or_not()
             .then(just(Colon).to(()).map_with_span(spanned).or_not())
             .then(value.or_not().clone())
-            .validate(|((s, p), o), span, emit| match (s, p, o) {
-                (Some(s), Some(_), Some(o)) => ObjectMember::Full(s, o),
-                (s, p, o) => {
+            .validate(|((s, p), o), span, emit| match (p, o) {
+                (Some(_), Some(o)) => ObjectMember::Full(s, o),
+                (p, o) => {
                     emit(Simple::custom(span, "Erroneous object member"));
                     ObjectMember::Partial(s, p, o)
                 }
             });
 
         let obj = just(CuOpen)
-            .ignore_then(
-                member.map_with_span(spanned).separated_by(just(Comma)), // .separated_by(just(Comma)),
-            )
+            .ignore_then(member.map_with_span(spanned).separated_by(just(Comma)))
             .then_ignore(just(CuClose))
             .map(Json::Object);
 
@@ -286,6 +281,7 @@ mod tests {
         let source = "{}";
         let (tokens, token_errors) = tokenize(source);
         let (json, json_errors) = parse(source, tokens);
+        println!("errors {:?}", json_errors);
 
         assert!(token_errors.is_empty());
         assert!(json_errors.is_empty());

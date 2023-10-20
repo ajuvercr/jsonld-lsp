@@ -2,7 +2,8 @@ use std::{fmt::Display, hash::Hash, ops::Range, sync::Arc};
 
 use chumsky::prelude::Simple;
 use lsp_types::{
-    CompletionItemKind, FormattingOptions, Position, SemanticToken, SemanticTokenType,
+    CompletionItem, CompletionItemKind, CompletionTextEdit, Documentation, FormattingOptions,
+    Position, SemanticToken, SemanticTokenType, TextEdit,
 };
 use tracing::debug;
 
@@ -13,6 +14,17 @@ pub struct SimpleDiagnostic {
     pub msg: String,
 }
 
+pub fn head() -> lsp_types::Range {
+    let start = lsp_types::Position {
+        line: 0,
+        character: 0,
+    };
+    lsp_types::Range {
+        end: start.clone(),
+        start,
+    }
+}
+
 #[derive(Debug)]
 pub struct SimpleCompletion {
     pub kind: CompletionItemKind,
@@ -20,7 +32,38 @@ pub struct SimpleCompletion {
     pub documentation: Option<String>,
     pub sort_text: Option<String>,
     pub filter_text: Option<String>,
-    pub edit: String,
+    pub edits: Vec<TextEdit>,
+}
+
+impl Into<CompletionItem> for SimpleCompletion {
+    fn into(self) -> CompletionItem {
+        let SimpleCompletion {
+            filter_text,
+            sort_text,
+            label,
+            documentation,
+            kind,
+            edits,
+        } = self;
+
+        let text_edit = edits
+            .iter()
+            .next()
+            .map(|x| CompletionTextEdit::Edit(x.clone()));
+
+        let additional_text_edits = edits.into_iter().skip(1).collect();
+
+        CompletionItem {
+            label,
+            kind: Some(kind),
+            sort_text,
+            filter_text,
+            documentation: documentation.map(|st| Documentation::String(st)),
+            text_edit,
+            additional_text_edits: Some(additional_text_edits),
+            ..Default::default()
+        }
+    }
 }
 
 impl<T: Display + Eq + Hash> From<Simple<T>> for SimpleDiagnostic {

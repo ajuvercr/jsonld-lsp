@@ -1,30 +1,45 @@
 use jsonld_language_server::backend::Backend;
 use jsonld_language_server::lang::turtle::TurtleLang;
-use log::LevelFilter;
+use jsonld_language_server::prefix::Prefixes;
 use std::fs::File;
+use std::io;
 use tower_lsp::LspService;
 use tower_lsp::Server;
+use tracing::info;
+use tracing::Level;
+use tracing_subscriber::fmt;
+use std::sync::Mutex;
 
 #[tokio::main]
 async fn main() {
-    let target = match File::create("/tmp/ttl-lsp.txt") {
-        Ok(x) => env_logger::Target::Pipe(Box::new(x)),
-        Err(_) => env_logger::Target::Stderr,
+    let target: Box<dyn io::Write + Send + Sync> = match File::create("/tmp/turtle-lsp.txt") {
+        Ok(x) => Box::new(x),
+        Err(_) => Box::new(std::io::stdout()),
     };
 
-    env_logger::Builder::from_default_env()
-        .target(target)
+    fmt()
+        .with_file(true)
+        .with_line_number(true)
+        .with_max_level(Level::DEBUG)
+        .with_writer(Mutex::new(target))
         .init();
-
-    log::set_max_level(LevelFilter::Trace);
-
-    log::error!("Starting up real good!");
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
+    let prefix = Prefixes::new().await.expect("Initalize prefixes");
+
+    if prefix
+        .fetch("rdf", |properties| {
+            info!(?properties);
+        })
+        .await
+        .is_none()
+    {
+        info!("No properties found");
+    };
+
     let (service, socket) =
-        LspService::build(|client| Backend::<_, TurtleLang>::new(client, Default::default()))
-            .finish();
+        LspService::build(|client| Backend::<_, TurtleLang>::new(client, prefix)).finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 }

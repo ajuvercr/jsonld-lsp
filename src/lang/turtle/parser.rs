@@ -58,7 +58,6 @@ fn named_node() -> impl Parser<Token, NamedNode, Error = Simple<Token>> + Clone 
     select! {
         Token::PredType => NamedNode::A,
         Token::IRIRef(x) => NamedNode::Full(x),
-        Token::PNameNS(x) => NamedNode::Prefixed { prefix: x.unwrap_or_default() , value: String::new() },
         Token::PNameLN(x, b) => NamedNode::Prefixed { prefix: x.unwrap_or_default(), value: b },
     }
 }
@@ -135,7 +134,7 @@ fn base() -> impl Parser<Token, Base, Error = Simple<Token>> + Clone {
 fn prefix() -> impl Parser<Token, Prefix, Error = Simple<Token>> {
     just(Token::PrefixTag)
         .map_with_span(|_, s| s)
-        .then(select! { |span| Token::PNameNS(x) => Spanned(x.unwrap_or_default(), span)})
+        .then(select! { |span| Token::PNameLN(x, _) => Spanned(x.unwrap_or_default(), span)})
         .then(named_node().map_with_span(spanned))
         .then_ignore(just(Token::Stop))
         .map(|((span, prefix), value)| Prefix {

@@ -113,12 +113,6 @@ pub fn format(tokens: &[&Token], options: FormattingOptions) -> String {
                 line += x.as_str();
                 line += ">";
             }
-            Token::PNameNS(x) => {
-                if let Some(x) = x {
-                    line += x.as_str();
-                }
-                line += ":";
-            }
             Token::PNameLN(x, y) => {
                 if let Some(x) = x {
                     line += x.as_str();
@@ -146,6 +140,7 @@ pub fn format(tokens: &[&Token], options: FormattingOptions) -> String {
                 line += x;
                 needs_new_line = true;
             }
+            Token::Invalid(x) => line += x,
         }
 
         first = false;

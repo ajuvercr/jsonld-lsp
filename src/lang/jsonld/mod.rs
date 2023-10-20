@@ -288,19 +288,29 @@ impl LangState for JsonLd {
 
         debug!(%location, ?closest_pref);
 
+        let end = position.clone();
+        // end.character += 1;
+        let start = Position::new(end.line, end.character - 1);
+        let range = lsp_types::Range::new(start, end);
+
         if trigger == Some("@".to_string()) {
             self.get_ids(&state)
                 .into_iter()
                 .map(|x| {
                     let w = Some(format!("@{x}"));
 
+                    let edits = vec![lsp_types::TextEdit {
+                        new_text: format!("{{\"@id\": \"{x}\"}}"),
+                        range: range.clone(),
+                    }];
+
                     SimpleCompletion {
                         documentation: Some(format!("Subject: {x}")),
-                        edit: format!("{{\"@id\": \"{x}\"}}"),
                         kind: CompletionItemKind::VARIABLE,
                         label: x,
                         sort_text: w.clone(),
                         filter_text: w,
+                        edits,
                     }
                 })
                 .collect()
@@ -358,7 +368,10 @@ impl LangState for JsonLd {
                     documentation: Some(format!("{} -> \"{}\"", v.key, v.value)),
                     sort_text: None,
                     filter_text: format!("\"{}", v.key).into(),
-                    edit: format!("\"{}", v.key),
+                    edits: vec![lsp_types::TextEdit {
+                        new_text: format!("\"{}", v.key),
+                        range: range.clone(),
+                    }],
                 })
                 .collect()
         }

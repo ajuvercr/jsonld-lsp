@@ -8,6 +8,16 @@ pub enum Literal {
     Boolean(bool),
     Numeric(String),
 }
+
+impl Literal {
+    pub fn plain_string(&self) -> String {
+        match self {
+            Literal::RDF(s) => s.plain_string(),
+            Literal::Boolean(x) => x.to_string(),
+            Literal::Numeric(x) => x.clone(),
+        }
+    }
+}
 impl Display for Literal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -24,6 +34,12 @@ pub struct RDFLiteral {
     pub quote_style: StringStyle,
     pub lang: Option<String>,
     pub ty: Option<NamedNode>,
+}
+
+impl RDFLiteral {
+    pub fn plain_string(&self) -> String {
+        self.value.to_string()
+    }
 }
 
 impl Display for RDFLiteral {
@@ -49,6 +65,24 @@ pub enum NamedNode {
     Prefixed { prefix: String, value: String },
     A,
     Invalid,
+}
+impl NamedNode {
+    pub fn expand(&self, turtle: &Turtle) -> Option<String> {
+        match self {
+            Self::Full(s) => s.clone().into(),
+            Self::Prefixed { prefix, value } => {
+                let prefix = turtle
+                    .prefixes
+                    .iter()
+                    .find(|x| x.0.prefix.as_str() == prefix.as_str())?;
+
+                let expaned = prefix.value.expand(turtle)?;
+                Some(format!("{}{}", expaned, value))
+            }
+            Self::A => Some("http://www.w3.org/1999/02/22-rdf-syntax-ns#type".to_string()),
+            Self::Invalid => None,
+        }
+    }
 }
 
 impl Display for NamedNode {
