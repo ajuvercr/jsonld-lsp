@@ -4,9 +4,7 @@ mod node;
 mod parser;
 mod token;
 pub mod tokenizer;
-use lsp_types::{
-    CompletionItemKind, Documentation, FormattingOptions, Position, SemanticTokenType,
-};
+use lsp_types::{CompletionItemKind, FormattingOptions, Position, SemanticTokenType};
 use std::ops::Range;
 use tracing::info;
 

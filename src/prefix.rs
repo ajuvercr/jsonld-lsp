@@ -79,6 +79,7 @@ struct Triple {
 }
 
 const TYPE: &'static str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+
 const PROPERTIES: &'static [(&'static str, PropertyType)] = &[
     (
         "http://www.w3.org/2002/07/owl#DatatypeProperty",
@@ -89,6 +90,10 @@ const PROPERTIES: &'static [(&'static str, PropertyType)] = &[
         PropertyType::ObjectProperty,
     ),
     ("http://www.w3.org/2002/07/owl#Class", PropertyType::Class),
+    (
+        "http://www.w3.org/1999/02/22-rdf-syntax-ns#Class",
+        PropertyType::Class,
+    ),
     (
         "http://www.w3.org/1999/02/22-rdf-syntax-ns#Property",
         PropertyType::Property,

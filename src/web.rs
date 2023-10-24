@@ -1,7 +1,13 @@
+use std::str::from_utf8;
+use std::sync::Mutex;
+
 use crate::{backend::Client, lang::jsonld::JsonLd, lsp_types::*, utils::web_types as wt};
 use serde::Serializer;
 use serde_json::json;
 use tower_lsp::LanguageServer;
+use tracing::info;
+use tracing::Level;
+use tracing_subscriber::fmt;
 use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
 
 use crate::backend::Backend;
@@ -115,10 +121,27 @@ impl Client for WebClient {
     }
 }
 
+impl std::io::Write for WebClient {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Ok(x) = from_utf8(buf) {
+            if let Err(e) = log_message(x.to_string().into()) {
+                let _ = log_message(format!("Failed logging msg {}", e).into());
+            }
+            Ok(buf.len())
+        } else {
+            Ok(0)
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 macro_rules! gen {
-    ($($fn:tt $ty:path)* ) => {
+    ($class:path ; $($fn:tt $ty:path)* ) => {
         #[wasm_bindgen]
-        impl WebBackend {
+        impl $class {
             $(
             pub async fn $fn(&self, params: $ty) -> Result<JsValue, JsValue> {
                 log_message(format!("Running {}", stringify!($fn)).into())?;
@@ -131,12 +154,17 @@ macro_rules! gen {
             )*
         }
     };
+
+    ($class:ty , $other:ty $( , $others:ty )*; $($fn:ident $ty:path)*) => {
+            gen!($other $(, $others)* ; $($fn $ty)*);
+            gen!($class ; $($fn $ty)*);
+    };
 }
 
 macro_rules! gen2 {
-    ($($fn:tt $ty:path)*) => {
+    ($class:path; $($fn:ident $ty:path)*) => {
         #[wasm_bindgen]
-        impl WebBackend {
+        impl $class {
             $(
             pub async fn $fn(&self, params: $ty) -> Result<JsValue, JsValue> {
                 log_message(format!("Running {}", stringify!($fn)).into())?;
@@ -153,23 +181,62 @@ macro_rules! gen2 {
             )*
         }
     };
+    ($class:ty , $other:ty $( , $others:ty )*; $($fn:ident $ty:path)*) => {
+
+            gen2!($other $(, $others)* ; $($fn $ty)*);
+            gen2!($class ; $($fn $ty)*);
+    };
 }
 
 #[wasm_bindgen]
-pub struct WebBackend {
+pub struct TurtleWebBackend {
     inner: Backend<WebClient, JsonLd>,
 }
 
 #[wasm_bindgen]
-impl WebBackend {
+impl TurtleWebBackend {
     #[wasm_bindgen(constructor)]
     pub fn new(client: WebClient) -> Self {
+        let target = WebClient::new();
+        fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(Level::DEBUG)
+            .with_writer(Mutex::new(target))
+            .init();
+
+        info!("turtle Webclient started");
+
         Self {
             inner: Backend::new(client, Default::default()),
         }
     }
 }
 
-gen!(initialize wt::InitializeParams prepare_rename wt::PrepareRenameParams  rename wt::RenameParams semantic_tokens_full wt::SemanticTokensParams completion wt::CompletionParams formatting wt::DocumentFormattingParams );
+#[wasm_bindgen]
+pub struct JsonWebBackend {
+    inner: Backend<WebClient, JsonLd>,
+}
 
-gen2!(did_open  wt::DidOpenTextDocumentParams did_change wt::DidChangeTextDocumentParams did_save wt::DidSaveTextDocumentParams);
+#[wasm_bindgen]
+impl JsonWebBackend {
+    #[wasm_bindgen(constructor)]
+    pub fn new(client: WebClient) -> Self {
+        let target = WebClient::new();
+        fmt()
+            .with_file(true)
+            .with_line_number(true)
+            .with_max_level(Level::DEBUG)
+            .with_writer(Mutex::new(target))
+            .init();
+
+        info!("jsonld Webclient started");
+        Self {
+            inner: Backend::new(client, Default::default()),
+        }
+    }
+}
+
+gen!(JsonWebBackend, TurtleWebBackend; initialize wt::InitializeParams prepare_rename wt::PrepareRenameParams  rename wt::RenameParams semantic_tokens_full wt::SemanticTokensParams completion wt::CompletionParams formatting wt::DocumentFormattingParams );
+
+gen2!(JsonWebBackend, TurtleWebBackend; did_open  wt::DidOpenTextDocumentParams did_change wt::DidChangeTextDocumentParams did_save wt::DidSaveTextDocumentParams);
