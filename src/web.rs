@@ -1,13 +1,14 @@
-use std::str::from_utf8;
-use std::sync::Mutex;
-
-use crate::{backend::Client, lang::jsonld::JsonLd, lsp_types::*, utils::web_types as wt};
+use crate::{
+    backend::Client,
+    lang::{jsonld::JsonLd, turtle::TurtleLang},
+    lsp_types::*,
+    prefix::Prefixes,
+    utils::web_types as wt,
+};
 use serde::Serializer;
 use serde_json::json;
 use tower_lsp::LanguageServer;
 use tracing::info;
-use tracing::Level;
-use tracing_subscriber::fmt;
 use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
 
 use crate::backend::Backend;
@@ -15,6 +16,21 @@ use crate::backend::Backend;
 const SER: serde_wasm_bindgen::Serializer = serde_wasm_bindgen::Serializer::json_compatible();
 static mut LOG_FN: Option<js_sys::Function> = None;
 static mut DIAGS_FN: Option<js_sys::Function> = None;
+
+#[wasm_bindgen(start)]
+pub fn start() -> Result<(), JsValue> {
+    // print pretty errors in wasm https://github.com/rustwasm/console_error_panic_hook
+    // This is not needed for tracing_wasm to work, but it is a common tool for getting proper error line numbers for panics.
+    console_error_panic_hook::set_once();
+
+    // Add this line:
+    let config = tracing_wasm::WASMLayerConfigBuilder::new()
+        .set_console_config(tracing_wasm::ConsoleConfig::ReportWithoutConsoleColor)
+        .build();
+    tracing_wasm::set_as_global_default_with_config(config);
+
+    Ok(())
+}
 
 fn publish_diagnostics(diags: JsValue) -> Result<(), String> {
     unsafe {
@@ -54,6 +70,7 @@ pub fn log_msg(msg: impl std::fmt::Display) {
 
 #[wasm_bindgen]
 pub struct WebClient;
+
 #[wasm_bindgen]
 impl WebClient {
     #[wasm_bindgen(constructor)]
@@ -64,11 +81,6 @@ impl WebClient {
     pub fn name(&self) -> String {
         "My name is Jeff".to_string()
     }
-}
-
-#[wasm_bindgen]
-pub fn init_panic_hook() {
-    console_error_panic_hook::set_once();
 }
 
 #[wasm_bindgen]
@@ -118,23 +130,6 @@ impl Client for WebClient {
         if let Err(e) = publish_diagnostics(diags) {
             let _ = log_message(format!("Failed publishing diags {}", e).into());
         }
-    }
-}
-
-impl std::io::Write for WebClient {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if let Ok(x) = from_utf8(buf) {
-            if let Err(e) = log_message(x.to_string().into()) {
-                let _ = log_message(format!("Failed logging msg {}", e).into());
-            }
-            Ok(buf.len())
-        } else {
-            Ok(0)
-        }
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
     }
 }
 
@@ -190,46 +185,27 @@ macro_rules! gen2 {
 
 #[wasm_bindgen]
 pub struct TurtleWebBackend {
+    inner: Backend<WebClient, TurtleLang>,
+}
+
+#[wasm_bindgen]
+pub async fn turtle_backend(client: WebClient) -> Option<TurtleWebBackend> {
+    let prefixes = Prefixes::new().await?;
+
+    Some(TurtleWebBackend {
+        inner: Backend::new(client, prefixes),
+    })
+}
+
+#[wasm_bindgen]
+pub struct JsonLDWebBackend {
     inner: Backend<WebClient, JsonLd>,
 }
 
 #[wasm_bindgen]
-impl TurtleWebBackend {
+impl JsonLDWebBackend {
     #[wasm_bindgen(constructor)]
     pub fn new(client: WebClient) -> Self {
-        let target = WebClient::new();
-        fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(Level::DEBUG)
-            .with_writer(Mutex::new(target))
-            .init();
-
-        info!("turtle Webclient started");
-
-        Self {
-            inner: Backend::new(client, Default::default()),
-        }
-    }
-}
-
-#[wasm_bindgen]
-pub struct JsonWebBackend {
-    inner: Backend<WebClient, JsonLd>,
-}
-
-#[wasm_bindgen]
-impl JsonWebBackend {
-    #[wasm_bindgen(constructor)]
-    pub fn new(client: WebClient) -> Self {
-        let target = WebClient::new();
-        fmt()
-            .with_file(true)
-            .with_line_number(true)
-            .with_max_level(Level::DEBUG)
-            .with_writer(Mutex::new(target))
-            .init();
-
         info!("jsonld Webclient started");
         Self {
             inner: Backend::new(client, Default::default()),
@@ -237,6 +213,6 @@ impl JsonWebBackend {
     }
 }
 
-gen!(JsonWebBackend, TurtleWebBackend; initialize wt::InitializeParams prepare_rename wt::PrepareRenameParams  rename wt::RenameParams semantic_tokens_full wt::SemanticTokensParams completion wt::CompletionParams formatting wt::DocumentFormattingParams );
+gen!(TurtleWebBackend, JsonLDWebBackend ; initialize wt::InitializeParams prepare_rename wt::PrepareRenameParams  rename wt::RenameParams semantic_tokens_full wt::SemanticTokensParams completion wt::CompletionParams formatting wt::DocumentFormattingParams );
 
-gen2!(JsonWebBackend, TurtleWebBackend; did_open  wt::DidOpenTextDocumentParams did_change wt::DidChangeTextDocumentParams did_save wt::DidSaveTextDocumentParams);
+gen2!(TurtleWebBackend, JsonLDWebBackend; did_open  wt::DidOpenTextDocumentParams did_change wt::DidChangeTextDocumentParams did_save wt::DidSaveTextDocumentParams);

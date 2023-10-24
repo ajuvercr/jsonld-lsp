@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use tracing::{debug, error};
 
 use reqwest::header::HeaderMap;
 
@@ -12,6 +11,7 @@ pub struct Resp {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn fetch(url: &str, headers: &HashMap<String, String>) -> std::result::Result<Resp, ()> {
+    use tracing::{debug, error};
     // TODO: This should not need to be reqwest blocking, but using the standard reqwest caused a
     // hang on `send`.
     // The same happened when testing with hyper

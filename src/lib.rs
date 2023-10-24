@@ -8,6 +8,8 @@ pub mod parent;
 pub mod prefix;
 pub mod semantics;
 pub mod utils;
+
+// #[cfg(feature = "web")]
 pub mod web;
 
 #[derive(Debug, PartialEq, Clone, Hash, Eq)]

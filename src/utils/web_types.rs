@@ -3,7 +3,7 @@ use wasm_bindgen::prelude::wasm_bindgen;
 #[wasm_bindgen(typescript_custom_section)]
 const ITEXT_STYLE: &'static str = r#"
 
-import { DidChangeTextDocumentParams, DidSaveTextDocumentParams, DidOpenTextDocumentParams, TextDocumentPositionParams, InitializeParams, PrepareRenameParams, RenameParams, SemanticTokensParams, Diagnostic, CompletionParams } from "vscode-languageserver";
+import { DidChangeTextDocumentParams, DidSaveTextDocumentParams, DidOpenTextDocumentParams, TextDocumentPositionParams, InitializeParams, PrepareRenameParams, RenameParams, SemanticTokensParams, Diagnostic, CompletionParams, DocumentFormattingParams } from "vscode-languageserver";
 
 
 type Diagnostics = { diagnostics: Diagnostic[]; uri: string };

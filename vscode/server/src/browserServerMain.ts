@@ -6,10 +6,10 @@ import { createConnection, BrowserMessageReader, BrowserMessageWriter } from 'vs
 
 import { InitializeParams, TextDocumentPositionParams, PrepareRenameParams, SemanticTokensParams, DidOpenTextDocumentParams, RenameParams } from 'vscode-languageserver';
 
-import init, { WebClient, WebBackend, set_logger, set_diags} from 'jsonld-language-server';
+import init, { WebClient, JsonLDWebBackend, set_logger, set_diags} from 'jsonld-language-server';
 
 
-let server: undefined | WebBackend;
+let server: undefined | JsonLDWebBackend;
 
 /* browser specific setup code */
 
@@ -17,6 +17,9 @@ const messageReader = new BrowserMessageReader(self);
 const messageWriter = new BrowserMessageWriter(self);
 
 const connection = createConnection(messageReader, messageWriter);
+
+console.log = connection.console.log.bind(connection.console);
+console.error = connection.console.error.bind(connection.console);
 
 function log_message(msg: string) {
 	connection.console.log(msg);
@@ -29,11 +32,13 @@ function publish_diagnostics(diags: any) {
 
 connection.onInitialize(async (params: InitializeParams) => {
 	await init();
+
 	set_logger(log_message);
 	set_diags(publish_diagnostics);
 
+	connection.console.log("Callbacks set!");
 
-	server = new WebBackend(new WebClient());
+  server = new JsonLDWebBackend(new WebClient());
 
 	const out = await server.initialize(params);
 
