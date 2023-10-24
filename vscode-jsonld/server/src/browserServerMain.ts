@@ -31,6 +31,7 @@ function publish_diagnostics(diags: any) {
 }
 
 connection.onInitialize(async (params: InitializeParams) => {
+  console.log("init params " + JSON.stringify(params, undefined, 2));
 	await init();
 
 	set_logger(log_message);
@@ -43,6 +44,7 @@ connection.onInitialize(async (params: InitializeParams) => {
 	const out = await server.initialize(params);
 
 	if (out) {
+    connection.console.log("out! " + JSON.stringify(out, undefined, 2))
 		return out;
 	}
 });
@@ -66,6 +68,7 @@ connection.onDidOpenTextDocument(async (x: DidOpenTextDocumentParams) => {
 // This handler provides the initial list of the completion items.
 connection.onCompletion(async (position: TextDocumentPositionParams) => {
 	const out = await server?.completion(position);
+  console.log("Completion response " + JSON.stringify(out));
   return out;
 });
 

@@ -1,0 +1,93 @@
+{
+	"name": "turtle-lsp",
+	"publisher": "ajuvercr",
+	"displayName": "turtle lsp",
+	"description": "A language server and language definition for turtle",
+	"author": "Arthur Vercruysse",
+	"license": "MIT",
+	"version": "0.0.1",
+	"repository": "https://github.com/ajuvercr/jsonld-lsp/",
+	"categories": [
+    "Language server",
+    "Completion",
+    "Formatting",
+    "Highlighting",
+		"Other"
+	],
+	"engines": {
+		"vscode": "^1.43.0"
+	},
+	"activationEvents": [
+		"onLanguage:turtle"
+	],
+	"browser": "./client/dist/browserClientMain",
+  "configurationDefaults": {
+    "[turtle]": {
+      "editor.semanticHighlighting.enabled": true
+    }
+  },
+	"contributes": {
+    "semanticTokenTypes": [
+      {
+        "id": "langTag",
+        "superType": "decorator",
+        "description": "Denoting the language of the literal"
+      },
+      {
+        "id": "boolean",
+        "superType": "number",
+        "description": "Boolean literal"
+      }
+    ],
+		"languages": [
+			{
+				"id": "turtle",
+				"extensions": [
+					".ttl"
+				],
+				"configuration": "./language-configuration.json"
+			}
+		],
+		"configuration": [
+			{
+				"order": 22,
+				"id": "turtle lsp",
+				"title": "turtle lsp",
+				"properties": {
+					"lsp-web-extension-sample.trace.server": {
+						"type": "string",
+						"scope": "window",
+						"enum": [
+							"off",
+							"messages",
+							"verbose"
+						],
+						"default": "messages",
+						"description": "Traces the communication between VS Code and the lsp-web-extension-sample language server."
+					}
+				}
+			}
+		]
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "webpack",
+		"watch": "webpack --watch",
+		"package": "webpack --mode production --devtool hidden-source-map",
+		"lint": "eslint ./client/src ./server/src --ext .ts,.tsx",
+		"postinstall": "cd client && npm install && cd ../server && npm install && cd ..",
+		"chrome": "npm run compile && vscode-test-web --browserType=chromium --extensionDevelopmentPath=. ./test-data"
+	},
+	"devDependencies": {
+		"@typescript-eslint/eslint-plugin": "^5.42.0",
+		"@typescript-eslint/parser": "^5.42.0",
+		"@vscode/test-web": "^0.0.22",
+		"@wasm-tool/wasm-pack-plugin": "^1.7.0",
+		"eslint": "^8.26.0",
+		"path-browserify": "^1.0.1",
+		"ts-loader": "^9.3.0",
+		"typescript": "^5.0.2",
+		"webpack": "^5.75.0",
+		"webpack-cli": "^4.7.2"
+	}
+}
