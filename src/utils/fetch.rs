@@ -66,12 +66,14 @@ mod web {
     use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
     use serde::Serializer;
     use serde_json::json;
+    use tracing::info;
     use wasm_bindgen::{prelude::wasm_bindgen, JsCast, JsValue};
     use web_sys::Response;
 
     #[wasm_bindgen]
     extern "C" {
-        async fn fetch(url: JsValue, options: JsValue) -> JsValue;
+        #[wasm_bindgen(catch)]
+        async fn fetch(url: JsValue, options: JsValue) -> Result<JsValue, JsValue>;
     }
 
     pub async fn local_fetch(
@@ -81,10 +83,11 @@ mod web {
     ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
         let ser: serde_wasm_bindgen::Serializer = serde_wasm_bindgen::Serializer::json_compatible();
         let options_json = json!({ "headers": headers });
-        let url = url.into();
+        let url = format!("https://proxy.linkeddatafragments.org/{}", url);
         let options = ser.serialize_some(&options_json).unwrap();
 
-        let resp_value = fetch(url, options).await;
+        let resp_value = fetch(url.clone().into(), options).await?;
+        info!("Got resp {}", url);
 
         // `resp_value` is a `Response` object.
         if !resp_value.is_instance_of::<Response>() {
@@ -116,6 +119,8 @@ mod web {
             .unwrap()
             .as_string()
             .unwrap();
+
+        info!("Got resp {} body {}", url, body.len());
 
         tx.send(Ok(Resp {
             headers: map,

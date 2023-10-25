@@ -19,8 +19,6 @@ static mut DIAGS_FN: Option<js_sys::Function> = None;
 
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
-    // print pretty errors in wasm https://github.com/rustwasm/console_error_panic_hook
-    // This is not needed for tracing_wasm to work, but it is a common tool for getting proper error line numbers for panics.
     console_error_panic_hook::set_once();
 
     // Add this line:
@@ -76,10 +74,6 @@ impl WebClient {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Self
-    }
-
-    pub fn name(&self) -> String {
-        "My name is Jeff".to_string()
     }
 }
 

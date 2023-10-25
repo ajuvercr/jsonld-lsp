@@ -98,14 +98,17 @@ impl lang::Token for Token {
                         span.start..span.start + 1 + s,
                     ),
                     (
-                        lsp_types::SemanticTokenType::ENUM,
+                        lsp_types::SemanticTokenType::ENUM_MEMBER,
                         span.start + s + 1..span.end,
                     ),
                 ]
             }
             Token::BlankNodeLabel(_) => {
                 vec![(
-                    lsp_types::SemanticTokenType::VARIABLE,
+                    lsp_types::SemanticTokenType::NAMESPACE,
+                    span.start..span.start + 2,
+                ),(
+                    lsp_types::SemanticTokenType::PROPERTY,
                     span.start + 2..span.end,
                 )]
             }

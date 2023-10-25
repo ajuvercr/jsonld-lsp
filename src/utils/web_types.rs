@@ -10,7 +10,6 @@ type Diagnostics = { diagnostics: Diagnostic[]; uri: string };
 type SetDiagnosticsFn = (diagnostics: Diagnostics) => void;
 
 type SetLoggerFn = (msg: string) => void;
-
 "#;
 
 #[wasm_bindgen]

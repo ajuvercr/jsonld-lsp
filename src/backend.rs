@@ -295,18 +295,10 @@ where
         }
         let (ref mut lang, ref state) = langs.get_mut(&id).unwrap();
 
-        self.client
-            .log_message(
-                MessageType::INFO,
-                format!(
-                    "Trigger character {:?}",
-                    params
-                        .context
-                        .as_ref()
-                        .and_then(|x| x.trigger_character.clone())
-                ),
-            )
-            .await;
+        info!(
+            "Trigger character {:?}",
+            params.context.as_ref().and_then(|x| x.trigger_character.clone())
+        );
 
         let ctx = params
             .context

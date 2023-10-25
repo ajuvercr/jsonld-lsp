@@ -67,7 +67,6 @@ fn parse(str: &str, location: &str) -> Option<Turtle> {
         // iew
         turtle.base = Some(spanned(turtle::Base(0..1, spanned(nn, 0..1)), 0..1));
     }
-    info!("turtle {:?}", turtle);
 
     Some(turtle)
 }

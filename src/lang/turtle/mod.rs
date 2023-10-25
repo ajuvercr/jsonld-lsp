@@ -70,18 +70,19 @@ impl Lang for TurtleLang {
     const LEGEND_TYPES: &'static [lsp_types::SemanticTokenType] = &[
         semantic_token::BOOLEAN,
         semantic_token::LANG_TAG,
-        SemanticTokenType::KEYWORD,
-        SemanticTokenType::PROPERTY,
-        SemanticTokenType::NUMBER,
-        SemanticTokenType::STRING,
-        SemanticTokenType::NAMESPACE,
-        SemanticTokenType::ENUM,
-        SemanticTokenType::VARIABLE,
         SemanticTokenType::COMMENT,
+        SemanticTokenType::ENUM_MEMBER,
+        SemanticTokenType::ENUM,
+        SemanticTokenType::KEYWORD,
+        SemanticTokenType::NAMESPACE,
+        SemanticTokenType::NUMBER,
+        SemanticTokenType::PROPERTY,
+        SemanticTokenType::STRING,
+        SemanticTokenType::VARIABLE,
     ];
 
     fn pattern() -> Option<String> {
-        Some(String::from("*.{ttl,turtle}"))
+        None
     }
 
     fn format(
@@ -227,7 +228,8 @@ impl LangState for TurtleLang {
         position: &Position,
         state: &CurrentLangState<Self>,
     ) -> Vec<super::SimpleCompletion> {
-        let location = position_to_offset(position.clone(), &self.rope).unwrap() - 1;
+        let location =
+            position_to_offset(position.clone(), &self.rope).unwrap_or(self.rope.len_chars()) - 1;
 
         info!("Completion on location {}", location);
         if let Some(token) = state
@@ -310,8 +312,8 @@ impl LangState for TurtleLang {
                                 kind: prop.ty.into(),
                                 label,
                                 documentation,
-                                sort_text: None,
-                                filter_text: None,
+                                sort_text: Some(format!("{}:{}", prefix_str, prop.short)),
+                                filter_text: Some(format!("{}:{}", prefix_str, prop.short)),
                                 edits,
                             })
                         }
