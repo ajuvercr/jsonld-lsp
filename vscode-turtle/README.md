@@ -1,41 +1,22 @@
-# JSON-LD Language Server and language definition
+# Turtle Language Server
 
-Pretty basic JSON-LD language server. 
+## Features
 
-This language server enables autocompletion on defined properties from the current JSON-LD context.
-It also enables autocompletion on defined ids in the current file and allows renaming these ids.
+- Turtle semantic highlighting
+![Highlighting](./highlighting.png)
+- Turtle formatting
+![Formatting](./format.png)
+- Turtle autocompletion based on prefix.cc and defined properties in ontology file
+![Completion](./complete.png)
 
-## Structure
+## State of this extension
 
-The main language server is written in Rust and can be found at the root of this repository.
-To build the VSCode extension the server needs to be compiled to WASM with the following command `wasm-pack build -t web --no-default-features`, this creates the pkg directory.
+This extension is in early development, expect bugs and crashes.
+Restarting the webview restarts the lsp when the lsp doens't behave anymore.
 
-Next, the extension can be built and debugged.
-- Run `npm install` in this folder. This installs all necessary npm modules in both the client and server folder
-- Open VS Code on this folder.
-- Press Ctrl+Shift+B to compile the client and server.
-- Switch to the Debug viewlet.
-- Select `Launch Client` from the drop down.
-- Run the launch config.
+Note that probably not all predicates are returned on autocompletion, there exist a multitude of ways to defined properties.
 
-Run `vsce package` to build the VsCode extension.
+## Bug report
 
-
-### Code structure 
-
-- __./client/src/browserClientMain.ts__ communicates with the current VSCode instance, when the extension is activated (__onLanguage:jsonld__) it starts the server code with a WebWorker and starts a Language Server Client that communicates with the WebWorker.
-- __./server/src/browserServerMain.ts__ is a thin wrapper around the WASM code but is in itself the actual Language Server. When the server gets the initialize command it dynamically loads the WASM and starts the WebBackend and forwards the request. After that, all request the server gets are passed along to the WASM instance.
-
-Note: Webpack inlines the WASM binary so that it bundles more easily.
-
-```
-.
-├── client // Language Client
-│   ├── src
-│   │   └── browserClientMain.ts // Language Client entry point
-├── package.json // The extension manifest.
-└── server // Language Server
-    └── src
-        └── browserServerMain.ts // Language Server entry point
-```
+Please report bugs as issue on the [github repository](https://github.com/ajuvercr/jsonld-lsp).
 
