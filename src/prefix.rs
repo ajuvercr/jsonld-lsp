@@ -1,4 +1,8 @@
-use std::{collections::HashMap, pin::Pin, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    pin::Pin,
+    sync::Arc,
+};
 
 use crate::{
     lang::turtle::{self, BlankNode, NamedNode, Turtle},
@@ -103,6 +107,8 @@ fn extract_properties(turtle: Turtle, prefix: &str) -> Vec<Property> {
     info!( triples = turtle.triples.len(), ?turtle.base);
     let mut triples: Vec<Triple> = Vec::new();
 
+    let mut found = HashSet::new();
+
     for triple in &turtle.triples {
         let subject = match &triple.subject.0 {
             turtle::Subject::BlankNode(BlankNode::Named(x)) => x.clone(),
@@ -154,6 +160,10 @@ fn extract_properties(turtle: Turtle, prefix: &str) -> Vec<Property> {
         };
 
         let id = subj.subject.clone();
+        if found.contains(&id) {
+            continue;
+        }
+        found.insert(id.clone());
 
         let short = id[prefix.len()..].to_string();
 
