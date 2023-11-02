@@ -1,4 +1,4 @@
-use crate::lang::{CurrentLangState, Lang, LangState, SimpleCompletion};
+use crate::lang::{CurrentLangState, Lang, LangState};
 use crate::lsp_types::*;
 
 use crate::utils::{offset_to_position, offsets_to_range, position_to_offset};
@@ -41,7 +41,7 @@ impl Client for tower_lsp::Client {
 }
 
 #[derive(Debug)]
-pub struct Backend<C: Client, L: LangState> {
+pub struct Backend<C: Client, L: LangState<C>> {
     pub client: C,
 
     cache: L::State,
@@ -50,7 +50,7 @@ pub struct Backend<C: Client, L: LangState> {
 }
 
 #[tower_lsp::async_trait]
-impl<C: Client + Send + Sync + 'static, L: LangState + Send + Sync + 'static> LanguageServer
+impl<C: Client + Send + Sync + 'static, L: LangState<C> + Send + Sync + 'static> LanguageServer
     for Backend<C, L>
 where
     <L as Lang>::State: Send + Sync + 'static,
@@ -297,7 +297,10 @@ where
 
         info!(
             "Trigger character {:?}",
-            params.context.as_ref().and_then(|x| x.trigger_character.clone())
+            params
+                .context
+                .as_ref()
+                .and_then(|x| x.trigger_character.clone())
         );
 
         let ctx = params
@@ -306,7 +309,12 @@ where
             .and_then(|x| x.trigger_character.clone());
 
         let simples = lang
-            .do_completion(ctx, &params.text_document_position.position, state)
+            .do_completion(
+                ctx,
+                &params.text_document_position.position,
+                state,
+                &self.client,
+            )
             .await;
 
         self.client
@@ -324,7 +332,7 @@ struct TextDocumentItem {
     version: i32,
 }
 
-impl<C: Client, L: LangState + Send + Sync> Backend<C, L> {
+impl<C: Client, L: LangState<C> + Send + Sync> Backend<C, L> {
     pub fn new(client: C, cache: L::State) -> Self {
         Backend {
             cache,

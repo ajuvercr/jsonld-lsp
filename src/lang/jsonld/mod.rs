@@ -13,6 +13,7 @@ use ropey::Rope;
 use tracing::debug;
 
 use crate::{
+    backend::Client,
     contexts::filter_definition,
     model::Spanned,
     parent::ParentingSystem,
@@ -251,7 +252,7 @@ impl Lang for JsonLd {
 }
 
 #[async_trait::async_trait]
-impl LangState for JsonLd {
+impl<C: Client + Send + Sync + 'static> LangState<C> for JsonLd {
     #[tracing::instrument(skip(self, state), fields(id=self.id))]
     async fn update(&mut self, state: &CurrentLangState<Self>) {
         debug!("update parents");
@@ -269,12 +270,13 @@ impl LangState for JsonLd {
         semantic_tokens(self, &state, &self.rope)
     }
 
-    #[tracing::instrument(skip(self, state), fields(id=self.id))]
+    #[tracing::instrument(skip(self, state, _client), fields(id=self.id))]
     async fn do_completion(
         &mut self,
         trigger: Option<String>,
         position: &Position,
         state: &CurrentLangState<Self>,
+        _client: &C,
     ) -> Vec<super::SimpleCompletion> {
         let parents = &state.parents.last_valid;
         let location = position_to_offset(position.clone(), &self.rope).unwrap();

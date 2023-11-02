@@ -2,12 +2,12 @@ use std::{fmt::Display, hash::Hash, ops::Range, sync::Arc};
 
 use chumsky::prelude::Simple;
 use lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionTextEdit, Documentation, FormattingOptions,
-    Position, SemanticToken, SemanticTokenType, TextEdit,
+    CompletionItem, CompletionItemKind, CompletionTextEdit,
+    Documentation, FormattingOptions, Position, SemanticToken, SemanticTokenType, TextEdit,
 };
 use tracing::debug;
 
-use crate::{model::Spanned, parent::ParentingSystem};
+use crate::{backend::Client, model::Spanned, parent::ParentingSystem};
 
 pub struct SimpleDiagnostic {
     pub range: Range<usize>,
@@ -231,7 +231,7 @@ pub trait Lang: Sized {
 }
 
 #[async_trait::async_trait]
-pub trait LangState: Lang
+pub trait LangState<C: Client>: Lang
 where
     Self: Sized,
 {
@@ -285,5 +285,6 @@ where
         trigger: Option<String>,
         position: &Position,
         state: &CurrentLangState<Self>,
+        client: &C,
     ) -> Vec<SimpleCompletion>;
 }

@@ -5,7 +5,6 @@ use std::fs::File;
 use std::io;
 use tower_lsp::LspService;
 use tower_lsp::Server;
-use tracing::info;
 use tracing::Level;
 use tracing_subscriber::fmt;
 use std::sync::Mutex;
@@ -28,16 +27,6 @@ async fn main() {
     let stdout = tokio::io::stdout();
 
     let prefix = Prefixes::new().await.expect("Initalize prefixes");
-
-    if prefix
-        .fetch("rdf", |properties| {
-            info!(?properties);
-        })
-        .await
-        .is_none()
-    {
-        info!("No properties found");
-    };
 
     let (service, socket) =
         LspService::build(|client| Backend::<_, TurtleLang>::new(client, prefix)).finish();

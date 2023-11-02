@@ -4,7 +4,9 @@ mod node;
 mod parser;
 mod token;
 pub mod tokenizer;
-use lsp_types::{CompletionItemKind, FormattingOptions, Position, SemanticTokenType};
+use lsp_types::{
+    CompletionItemKind, FormattingOptions, MessageType, Position, SemanticTokenType,
+};
 use std::ops::Range;
 use tracing::info;
 
@@ -15,6 +17,7 @@ pub use parser::*;
 use ropey::Rope;
 
 use crate::{
+    backend::Client,
     lang::{self, head},
     model::{spanned, Spanned},
     parent::ParentingSystem,
@@ -212,7 +215,7 @@ impl Lang for TurtleLang {
 }
 
 #[async_trait::async_trait]
-impl LangState for TurtleLang {
+impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
     async fn update(&mut self, _state: &CurrentLangState<Self>) {}
 
     async fn do_semantic_tokens(
@@ -227,6 +230,7 @@ impl LangState for TurtleLang {
         _trigger: Option<String>,
         position: &Position,
         state: &CurrentLangState<Self>,
+        client: &C,
     ) -> Vec<super::SimpleCompletion> {
         let location =
             position_to_offset(position.clone(), &self.rope).unwrap_or(self.rope.len_chars()) - 1;
@@ -290,34 +294,41 @@ impl LangState for TurtleLang {
                 let prefix_str = prefix.as_ref().map(|x| x.as_str()).unwrap_or("");
                 info!("Range {:?}", range);
                 self.prefixes
-                    .fetch(prefix_str, |props| {
-                        info!("Properties {}", props.len());
-                        for prop in props {
-                            let new_text = format!("{}:{}", prefix_str, prop.short);
-                            let edits = vec![lsp_types::TextEdit {
-                                new_text,
-                                range: range.clone(),
-                            }];
-                            let label = format!("{}: {}", prop.short, prop.id);
-                            let documentation = match (&prop.comment, &prop.label) {
-                                (Some(comment), Some(label)) => {
-                                    Some(format!("{}\n{}", label, comment))
-                                }
-                                (None, Some(label)) => Some(format!("{}", label)),
-                                (Some(comment), None) => Some(format!("{}", comment)),
-                                (None, None) => None,
-                            };
+                    .fetch(
+                        prefix_str,
+                        |props| {
+                            info!("Properties {}", props.len());
 
-                            out.push(SimpleCompletion {
-                                kind: prop.ty.into(),
-                                label,
-                                documentation,
-                                sort_text: Some(format!("{}:{}", prefix_str, prop.short)),
-                                filter_text: Some(format!("{}:{}", prefix_str, prop.short)),
-                                edits,
-                            })
-                        }
-                    })
+                            for prop in props {
+                                let new_text = format!("{}:{}", prefix_str, prop.short);
+                                let edits = vec![lsp_types::TextEdit {
+                                    new_text,
+                                    range: range.clone(),
+                                }];
+
+                                let label = match (&prop.comment, &prop.label) {
+                                    (Some(comment), Some(label)) => {
+                                        format!("{}: {}", label, comment)
+                                    }
+                                    (None, Some(label)) => label.clone(),
+                                    (Some(comment), None) => format!("{}: {}", prop.short, comment),
+                                    (None, None) => prop.short.clone(),
+                                };
+
+                                let documentation = Some(prop.id.clone());
+
+                                out.push(SimpleCompletion {
+                                    kind: prop.ty.into(),
+                                    label,
+                                    documentation,
+                                    sort_text: Some(format!("{}:{}", prefix_str, prop.short)),
+                                    filter_text: Some(format!("{}:{}", prefix_str, prop.short)),
+                                    edits,
+                                })
+                            }
+                        },
+                        |msg| client.log_message(MessageType::INFO, msg),
+                    )
                     .await;
 
                 info!("Returning {} suggestions", out.len());

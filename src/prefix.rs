@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, pin::Pin, sync::Arc};
 
 use crate::{
     lang::turtle::{self, BlankNode, NamedNode, Turtle},
@@ -90,7 +90,7 @@ const PROPERTIES: &'static [(&'static str, PropertyType)] = &[
     ),
     ("http://www.w3.org/2002/07/owl#Class", PropertyType::Class),
     (
-        "http://www.w3.org/1999/02/22-rdf-syntax-ns#Class",
+        "http://www.w3.org/2000/01/rdf-schema#Class",
         PropertyType::Class,
     ),
     (
@@ -207,26 +207,52 @@ impl Prefixes {
         self.names.keys().map(|x| x.as_str())
     }
 
-    pub async fn fetch<'a>(&'a self, prefix: &str, f: impl FnOnce(&[Property])) -> Option<()> {
+    pub async fn fetch<'a>(
+        &'a self,
+        prefix: &str,
+        f: impl FnOnce(&[Property]),
+        msg: impl Fn(String) -> Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>,
+    ) -> Option<()> {
         let url = self.get(prefix)?;
         {
             let props = self.properties.lock().await;
             if let Some(out) = props.get(prefix) {
+                msg(format!(
+                    "Found properties for {} in cache (found = {})",
+                    prefix,
+                    out.is_some()
+                ))
+                .await;
                 f(out.as_ref()?);
                 return Some(());
             }
             // Drop props lock before the request
         }
 
+        msg(format!(
+            "Properties ({}) not found in cache, fetching {}",
+            prefix, url,
+        ))
+        .await;
+
         info!(%url);
+
         let headers = [("Accept".to_string(), "text/turtle".to_string())].into();
         let resp = if let Some(resp) = fetch(&url, &headers).await.ok() {
             info!(?resp.status, len = resp.body.len());
+            msg(format!(
+                "Fetch successful {} ({} bytes)",
+                url,
+                resp.body.len()
+            ))
+            .await;
             resp
         } else {
             info!("Fetch failed");
             let mut props = self.properties.lock().await;
             props.insert(prefix.to_string(), None);
+
+            msg(format!("Failed to fetch {}", url,)).await;
             return None;
         };
 
@@ -234,9 +260,11 @@ impl Prefixes {
         let properties = parse(&resp.body, &url).map(|x| extract_properties(x, url));
 
         let out = if let Some(p) = properties.as_ref() {
+            msg(format!("Parse successful {}", url,)).await;
             f(&p);
             Some(())
         } else {
+            msg(format!("Failed to parse {}", url,)).await;
             None
         };
 
