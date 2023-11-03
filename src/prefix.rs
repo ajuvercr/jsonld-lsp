@@ -223,19 +223,16 @@ impl Prefixes {
 
     pub async fn fetch<'a>(
         &'a self,
-        prefix: &str,
+        url: &str,
         f: impl FnOnce(&[Property]),
         msg: impl Fn(String) -> Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>,
     ) -> Result<(), String> {
-        let url = self
-            .get(prefix)
-            .ok_or(format!("Prefix not found {}", prefix))?;
         {
             let props = self.properties.lock().await;
-            if let Some(out) = props.get(prefix) {
+            if let Some(out) = props.get(url) {
                 msg(format!(
                     "Found properties for {} in cache (found = {})",
-                    prefix,
+                    url,
                     out.is_ok()
                 ))
                 .await;
@@ -247,11 +244,7 @@ impl Prefixes {
             // Drop props lock before the request
         }
 
-        msg(format!(
-            "Properties ({}) not found in cache, fetching {}",
-            prefix, url,
-        ))
-        .await;
+        msg(format!("Properties not found in cache, fetching {}", url,)).await;
 
         info!(%url);
 
@@ -269,7 +262,7 @@ impl Prefixes {
             }
             Err(e) => {
                 let mut props = self.properties.lock().await;
-                props.insert(prefix.to_string(), Err(e.clone()));
+                props.insert(url.to_string(), Err(e.clone()));
 
                 msg(format!("Failed to fetch {}", url,)).await;
                 return Err(e);
@@ -293,7 +286,7 @@ impl Prefixes {
 
         info!("Locking properties");
         let mut props = self.properties.lock().await;
-        props.insert(prefix.to_string(), properties);
+        props.insert(url.to_string(), properties);
 
         out
     }

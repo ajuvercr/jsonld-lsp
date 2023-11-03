@@ -1,3 +1,5 @@
+use hashbrown::HashSet;
+
 use super::token::StringStyle;
 use crate::model::Spanned;
 use std::{fmt::Display, ops::Range};
@@ -68,15 +70,22 @@ pub enum NamedNode {
 }
 impl NamedNode {
     pub fn expand(&self, turtle: &Turtle) -> Option<String> {
+        self.expand_step(turtle, HashSet::new())
+    }
+    fn expand_step<'a>(&'a self, turtle: &Turtle, mut done: HashSet<&'a str>) -> Option<String> {
         match self {
             Self::Full(s) => s.clone().into(),
             Self::Prefixed { prefix, value } => {
+                if done.contains(prefix.as_str()) {
+                    return None;
+                }
+                done.insert(prefix);
                 let prefix = turtle
                     .prefixes
                     .iter()
                     .find(|x| x.0.prefix.as_str() == prefix.as_str())?;
 
-                let expaned = prefix.value.expand(turtle)?;
+                let expaned = prefix.value.expand_step(turtle, done)?;
                 Some(format!("{}{}", expaned, value))
             }
             Self::A => Some("http://www.w3.org/1999/02/22-rdf-syntax-ns#type".to_string()),

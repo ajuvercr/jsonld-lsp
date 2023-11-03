@@ -223,17 +223,32 @@ impl Lang for TurtleLang {
         sender: DiagnosticSender,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
         let prefixes = self.prefixes.clone();
-        let prefixes_ids = state.element.current.prefixes.clone();
+        let turtle = &state.element.current;
+        let prefixes_ids: Vec<_> = turtle
+            .prefixes
+            .iter()
+            .flat_map(|Spanned(ref prefix, ref span)| {
+                prefix
+                    .value
+                    .expand(turtle)
+                    .map(|pref| Spanned(pref, span.clone()))
+            })
+            .collect();
         async move {
             info!("Post update start");
+
+            // Rust please
+            let sender = &sender;
+            let prefixes = &prefixes;
+
             prefixes_ids
-                .iter()
-                .map(|prefix| async {
+                .into_iter()
+                .map(|prefix| async move {
                     if let Err(e) = prefixes
-                        .fetch(&prefix.prefix, |_| {}, |_msg| async {}.boxed())
+                        .fetch(&prefix, |_| {}, |_msg| async {}.boxed())
                         .await
                     {
-                        info!("sending diagnostic, {} ", prefix.prefix.value());
+                        info!("sending diagnostic, {} ", prefix.value());
                         sender.push(SimpleDiagnostic::new_severity(
                             prefix.span().clone(),
                             format!("Failed to fetch prefix: {}", e),
@@ -366,15 +381,29 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
             }
 
             if let Spanned(Token::PNameLN(prefix, _), range) = &token {
-                let mut out = Vec::new();
-                let range = range_to_range(range, &self.rope).unwrap_or_default();
-
+                // Lets find the corresponding prefix thanks
                 let prefix_str = prefix.as_ref().map(|x| x.as_str()).unwrap_or("");
-                info!("Range {:?}", range);
-                let _ =
-                    self.prefixes
+                let turtle = &state.element.last_valid;
+
+                let m_expanended = if let Some(prefix) = turtle
+                    .prefixes
+                    .iter()
+                    .find(|x| x.prefix.as_str() == prefix_str)
+                {
+                    prefix.value.expand(turtle)
+                } else {
+                    self.prefixes.get(prefix_str).map(String::from)
+                };
+
+                let mut out = Vec::new();
+                if let Some(expaned) = m_expanended {
+                    let range = range_to_range(range, &self.rope).unwrap_or_default();
+
+                    info!("Range {:?}", range);
+                    let _ = self
+                        .prefixes
                         .fetch(
-                            prefix_str,
+                            &expaned,
                             |props| {
                                 info!("Properties {}", props.len());
 
@@ -386,8 +415,8 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                         )
                         .await;
 
-                info!("Returning {} suggestions", out.len());
-
+                    info!("Returning {} suggestions", out.len());
+                }
                 return out;
             }
         }
