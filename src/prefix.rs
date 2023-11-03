@@ -45,13 +45,15 @@ impl Into<CompletionItemKind> for PropertyType {
 #[derive(Clone, Debug)]
 pub struct Prefixes {
     names: Arc<HashMap<String, String>>,
-    properties: Arc<Mutex<HashMap<String, Option<Vec<Property>>>>>,
+    properties: Arc<Mutex<HashMap<String, Result<Vec<Property>, String>>>>,
 }
 
-fn parse(str: &str, location: &str) -> Option<Turtle> {
+fn parse(str: &str, location: &str) -> Result<Turtle, String> {
     let parser = turtle::tokenizer::parse_tokens();
 
-    let tokens = parser.parse(str).ok()?;
+    let tokens = parser
+        .parse(str)
+        .map_err(|_| String::from("Tokenizing failed"))?;
     info!("{} tokens", tokens.len());
 
     let stream = chumsky::Stream::from_iter(
@@ -64,7 +66,7 @@ fn parse(str: &str, location: &str) -> Option<Turtle> {
     let (turtle, errors) = parser.parse_recovery(stream);
     info!(?errors);
 
-    let mut turtle = turtle?;
+    let mut turtle = turtle.ok_or(String::from("Not valid turtle"))?;
 
     if turtle.base.is_none() {
         let nn = NamedNode::Full(location.into());
@@ -72,7 +74,7 @@ fn parse(str: &str, location: &str) -> Option<Turtle> {
         turtle.base = Some(spanned(turtle::Base(0..1, spanned(nn, 0..1)), 0..1));
     }
 
-    Some(turtle)
+    Ok(turtle)
 }
 
 struct Triple {
@@ -197,7 +199,9 @@ fn extract_properties(turtle: Turtle, prefix: &str) -> Vec<Property> {
 impl Prefixes {
     pub async fn new() -> Option<Prefixes> {
         let headers = [].into();
+        info!("Fetching");
         let resp = fetch("http://prefix.cc/context", &headers).await.ok()?;
+        info!("Fetched");
 
         let context: HashMap<String, HashMap<String, String>> =
             serde_json::from_str(&resp.body).ok()?;
@@ -222,20 +226,24 @@ impl Prefixes {
         prefix: &str,
         f: impl FnOnce(&[Property]),
         msg: impl Fn(String) -> Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>,
-    ) -> Option<()> {
-        let url = self.get(prefix)?;
+    ) -> Result<(), String> {
+        let url = self
+            .get(prefix)
+            .ok_or(format!("Prefix not found {}", prefix))?;
         {
             let props = self.properties.lock().await;
             if let Some(out) = props.get(prefix) {
                 msg(format!(
                     "Found properties for {} in cache (found = {})",
                     prefix,
-                    out.is_some()
+                    out.is_ok()
                 ))
                 .await;
                 f(out.as_ref()?);
-                return Some(());
+                return Ok(());
             }
+            info!("Should drop props");
+            drop(props);
             // Drop props lock before the request
         }
 
@@ -248,36 +256,42 @@ impl Prefixes {
         info!(%url);
 
         let headers = [("Accept".to_string(), "text/turtle".to_string())].into();
-        let resp = if let Some(resp) = fetch(&url, &headers).await.ok() {
-            info!(?resp.status, len = resp.body.len());
-            msg(format!(
-                "Fetch successful {} ({} bytes)",
-                url,
-                resp.body.len()
-            ))
-            .await;
-            resp
-        } else {
-            info!("Fetch failed");
-            let mut props = self.properties.lock().await;
-            props.insert(prefix.to_string(), None);
+        let resp = match fetch(&url, &headers).await {
+            Ok(resp) => {
+                info!(?resp.status, len = resp.body.len());
+                msg(format!(
+                    "Fetch successful {} ({} bytes)",
+                    url,
+                    resp.body.len()
+                ))
+                .await;
+                resp
+            }
+            Err(e) => {
+                let mut props = self.properties.lock().await;
+                props.insert(prefix.to_string(), Err(e.clone()));
 
-            msg(format!("Failed to fetch {}", url,)).await;
-            return None;
+                msg(format!("Failed to fetch {}", url,)).await;
+                return Err(e);
+            }
         };
 
         // Parse the turtle
         let properties = parse(&resp.body, &url).map(|x| extract_properties(x, url));
 
-        let out = if let Some(p) = properties.as_ref() {
-            msg(format!("Parse successful {}", url,)).await;
-            f(&p);
-            Some(())
-        } else {
-            msg(format!("Failed to parse {}", url,)).await;
-            None
+        let out = match properties.as_ref() {
+            Ok(p) => {
+                msg(format!("Parse successful {}", url,)).await;
+                f(&p);
+                Ok(())
+            }
+            Err(e) => {
+                msg(format!("Failed to parse {}", url,)).await;
+                Err(e.clone())
+            }
         };
 
+        info!("Locking properties");
         let mut props = self.properties.lock().await;
         props.insert(prefix.to_string(), properties);
 

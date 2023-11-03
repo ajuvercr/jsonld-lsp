@@ -1,17 +1,39 @@
 use std::{fmt::Display, hash::Hash, ops::Range, sync::Arc};
 
 use chumsky::prelude::Simple;
+use futures::FutureExt;
+use futures::{channel::mpsc, StreamExt};
 use lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionTextEdit,
-    Documentation, FormattingOptions, Position, SemanticToken, SemanticTokenType, TextEdit,
+    CompletionItem, CompletionItemKind, CompletionTextEdit, Diagnostic, DiagnosticSeverity,
+    Documentation, FormattingOptions, Position, SemanticToken, SemanticTokenType, TextEdit, Url,
 };
+use ropey::Rope;
 use tracing::debug;
 
-use crate::{backend::Client, model::Spanned, parent::ParentingSystem};
+use crate::{backend::Client, model::Spanned, parent::ParentingSystem, utils::offset_to_position};
 
 pub struct SimpleDiagnostic {
     pub range: Range<usize>,
     pub msg: String,
+    pub severity: Option<DiagnosticSeverity>,
+}
+
+impl SimpleDiagnostic {
+    pub fn new(range: Range<usize>, msg: String) -> Self {
+        Self {
+            range,
+            msg,
+            severity: None,
+        }
+    }
+
+    pub fn new_severity(range: Range<usize>, msg: String, severity: DiagnosticSeverity) -> Self {
+        Self {
+            range,
+            msg,
+            severity: Some(severity),
+        }
+    }
 }
 
 pub fn head() -> lsp_types::Range {
@@ -97,10 +119,7 @@ impl<T: Display + Eq + Hash> From<Simple<T>> for SimpleDiagnostic {
             )
         };
 
-        SimpleDiagnostic {
-            range: e.span(),
-            msg,
-        }
+        SimpleDiagnostic::new(e.span(), msg)
     }
 }
 
@@ -228,10 +247,18 @@ pub trait Lang: Sized {
     ) -> Result<Vec<(std::ops::Range<usize>, String)>, Self::RenameError>;
 
     fn new(id: String, state: Self::State) -> (Self, CurrentLangState<Self>);
+
+    fn post_update_diagnostics(
+        &self,
+        _state: &CurrentLangState<Self>,
+        _sender: DiagnosticSender,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+        async {}.boxed()
+    }
 }
 
 #[async_trait::async_trait]
-pub trait LangState<C: Client>: Lang
+pub trait LangState<C: Client + Send + Sync + 'static>: Lang
 where
     Self: Sized,
 {
@@ -243,7 +270,8 @@ where
         &mut self,
         source: &str,
         state: &mut CurrentLangState<Self>,
-    ) -> Vec<SimpleDiagnostic> {
+        sender: DiagnosticSender,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
         let (tokens, token_errors) = self.tokenize(source);
         debug!( token_errors = ?token_errors);
 
@@ -273,11 +301,15 @@ where
 
         self.update(&state).await;
 
-        token_errors
-            .into_iter()
-            .map(|x| x.into())
-            .chain(parse_errors.into_iter().map(|x| x.into()))
-            .collect()
+        sender.push_all(
+            token_errors
+                .into_iter()
+                .map(|x| Into::<SimpleDiagnostic>::into(x))
+                .chain(parse_errors.into_iter().map(|x| x.into()))
+                .collect(),
+        );
+
+        self.post_update_diagnostics(state, sender)
     }
 
     async fn do_completion(
@@ -287,4 +319,73 @@ where
         state: &CurrentLangState<Self>,
         client: &C,
     ) -> Vec<SimpleCompletion>;
+}
+
+#[derive(Clone)]
+pub struct DiagnosticSender {
+    tx: mpsc::UnboundedSender<Vec<SimpleDiagnostic>>,
+}
+impl DiagnosticSender {
+    pub fn push(&self, diagnostic: SimpleDiagnostic) -> Option<()> {
+        let out = self.tx.unbounded_send(vec![diagnostic]).ok();
+        out
+    }
+
+    pub fn push_all(&self, diagnostics: Vec<SimpleDiagnostic>) -> Option<()> {
+        self.tx.unbounded_send(diagnostics).ok()
+    }
+}
+
+pub struct Publisher<C: Client + Send + Sync + 'static> {
+    version: i32,
+    uri: Url,
+    client: C,
+    diagnostics: Vec<Diagnostic>,
+    rope: Rope,
+    rx: mpsc::UnboundedReceiver<Vec<SimpleDiagnostic>>,
+}
+
+impl<C: Client + Send + Sync + 'static> Publisher<C> {
+    pub fn new(uri: Url, version: i32, client: C, rope: Rope) -> (Self, DiagnosticSender) {
+        let (tx, rx) = mpsc::unbounded();
+        (
+            Self {
+                version,
+                uri,
+                client,
+                diagnostics: Vec::new(),
+                rx,
+                rope,
+            },
+            DiagnosticSender { tx },
+        )
+    }
+
+    pub async fn spawn(mut self) {
+        loop {
+            if let Some(x) = self.rx.next().await {
+                self.diagnostics.extend(x.into_iter().flat_map(|item| {
+                    let (span, message) = (item.range, item.msg);
+                    let start_position = offset_to_position(span.start, &self.rope)?;
+                    let end_position = offset_to_position(span.end, &self.rope)?;
+                    Some(Diagnostic {
+                        range: lsp_types::Range::new(start_position, end_position),
+                        message,
+                        severity: item.severity,
+                        ..Default::default()
+                    })
+                }));
+
+                self.client
+                    .publish_diagnostics(
+                        self.uri.clone(),
+                        self.diagnostics.clone(),
+                        Some(self.version),
+                    )
+                    .await;
+            } else {
+                return;
+            }
+        }
+    }
 }

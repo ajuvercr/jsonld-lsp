@@ -104,13 +104,16 @@ impl lang::Token for Token {
                 ]
             }
             Token::BlankNodeLabel(_) => {
-                vec![(
-                    lsp_types::SemanticTokenType::NAMESPACE,
-                    span.start..span.start + 2,
-                ),(
-                    lsp_types::SemanticTokenType::PROPERTY,
-                    span.start + 2..span.end,
-                )]
+                vec![
+                    (
+                        lsp_types::SemanticTokenType::NAMESPACE,
+                        span.start..span.start + 2,
+                    ),
+                    (
+                        lsp_types::SemanticTokenType::PROPERTY,
+                        span.start + 2..span.end,
+                    ),
+                ]
             }
             _ => vec![],
         }

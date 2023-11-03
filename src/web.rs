@@ -1,3 +1,4 @@
+use crate::backend::ClientSync;
 use crate::{
     backend::Client,
     lang::{jsonld::JsonLd, turtle::TurtleLang},
@@ -67,6 +68,7 @@ pub fn log_msg(msg: impl std::fmt::Display) {
 }
 
 #[wasm_bindgen]
+#[derive(Clone)]
 pub struct WebClient;
 
 #[wasm_bindgen]
@@ -96,6 +98,18 @@ pub fn set_diags(f: wt::SetDiagnosticsFn) {
 #[wasm_bindgen]
 pub fn create_webclient() -> WebClient {
     WebClient::new()
+}
+
+impl ClientSync for WebClient {
+    fn spawn<O: Send + 'static, F: std::future::Future<Output = O> + Send + 'static>(
+        &self,
+        fut: F,
+    ) {
+        let _ = wasm_bindgen_futures::future_to_promise(async {
+            fut.await;
+            Ok("Good".into())
+        });
+    }
 }
 
 #[tower_lsp::async_trait]

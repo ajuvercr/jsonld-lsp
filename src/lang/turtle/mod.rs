@@ -4,8 +4,10 @@ mod node;
 mod parser;
 mod token;
 pub mod tokenizer;
+use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use lsp_types::{
-    CompletionItemKind, FormattingOptions, MessageType, Position, SemanticTokenType,
+    CompletionItemKind, DiagnosticSeverity, FormattingOptions, MessageType, Position,
+    SemanticTokenType,
 };
 use std::ops::Range;
 use tracing::info;
@@ -21,7 +23,7 @@ use crate::{
     lang::{self, head},
     model::{spanned, Spanned},
     parent::ParentingSystem,
-    prefix::Prefixes,
+    prefix::{Prefixes, Property},
     semantics::semantic_tokens,
     utils::{position_to_offset, range_to_range},
 };
@@ -32,7 +34,9 @@ use self::{
     token::Token,
 };
 
-use super::{CurrentLangState, Lang, LangState, SimpleCompletion};
+use super::{
+    CurrentLangState, DiagnosticSender, Lang, LangState, SimpleCompletion, SimpleDiagnostic,
+};
 
 pub mod semantic_token {
     use lsp_types::SemanticTokenType as STT;
@@ -212,6 +216,114 @@ impl Lang for TurtleLang {
             Default::default(),
         )
     }
+
+    fn post_update_diagnostics(
+        &self,
+        state: &CurrentLangState<Self>,
+        sender: DiagnosticSender,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+        let prefixes = self.prefixes.clone();
+        let prefixes_ids = state.element.current.prefixes.clone();
+        async move {
+            info!("Post update start");
+            prefixes_ids
+                .iter()
+                .map(|prefix| async {
+                    if let Err(e) = prefixes
+                        .fetch(&prefix.prefix, |_| {}, |_msg| async {}.boxed())
+                        .await
+                    {
+                        info!("sending diagnostic, {} ", prefix.prefix.value());
+                        sender.push(SimpleDiagnostic::new_severity(
+                            prefix.span().clone(),
+                            format!("Failed to fetch prefix: {}", e),
+                            DiagnosticSeverity::WARNING,
+                        ));
+                    }
+                })
+                .collect::<FuturesUnordered<_>>()
+                .count()
+                .await;
+            info!("Post update end");
+        }
+        .boxed()
+    }
+}
+
+impl TurtleLang {
+    fn prefix_to_completion(
+        &self,
+        key: &str,
+        state: &CurrentLangState<Self>,
+        range: lsp_types::Range,
+    ) -> SimpleCompletion {
+        let url = self
+            .prefixes
+            .get(key)
+            .map(|x| x.to_string())
+            .unwrap_or_default();
+
+        let mut edits = vec![lsp_types::TextEdit {
+            new_text: format!("{}:", key),
+            range,
+        }];
+
+        if state
+            .element
+            .last_valid
+            .prefixes
+            .iter()
+            .find(|x| x.prefix.as_str() == key)
+            .is_none()
+        {
+            edits.push(lsp_types::TextEdit {
+                new_text: format!("@prefix {}: <{}>.\n", key, url),
+                range: head(),
+            });
+        }
+
+        SimpleCompletion {
+            kind: CompletionItemKind::MODULE,
+            label: format!("{}", key),
+            documentation: Some(url.clone()),
+            sort_text: None,
+            filter_text: None,
+            edits,
+        }
+    }
+
+    fn property_to_completion(
+        &self,
+        prop: &Property,
+        prefix: &str,
+        range: lsp_types::Range,
+    ) -> SimpleCompletion {
+        let new_text = format!("{}:{}", prefix, prop.short);
+        let edits = vec![lsp_types::TextEdit {
+            new_text,
+            range: range.clone(),
+        }];
+
+        let label = match (&prop.comment, &prop.label) {
+            (Some(comment), Some(label)) => {
+                format!("{}: {}", label, comment)
+            }
+            (None, Some(label)) => label.clone(),
+            (Some(comment), None) => format!("{}: {}", prop.short, comment),
+            (None, None) => prop.short.clone(),
+        };
+
+        let documentation = Some(prop.id.clone());
+
+        SimpleCompletion {
+            kind: prop.ty.into(),
+            label,
+            documentation,
+            sort_text: Some(format!("{}:{}", prefix, prop.short)),
+            filter_text: Some(format!("{}:{}", prefix, prop.short)),
+            edits,
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -249,41 +361,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                 return self
                     .prefixes
                     .get_all()
-                    .map(|key| {
-                        let url = self
-                            .prefixes
-                            .get(key)
-                            .map(|x| x.to_string())
-                            .unwrap_or_default();
-
-                        let mut edits = vec![lsp_types::TextEdit {
-                            new_text: format!("{}:", key),
-                            range,
-                        }];
-
-                        if state
-                            .element
-                            .last_valid
-                            .prefixes
-                            .iter()
-                            .find(|x| x.prefix.as_str() == key)
-                            .is_none()
-                        {
-                            edits.push(lsp_types::TextEdit {
-                                new_text: format!("@prefix {}: <{}>.\n", key, url),
-                                range: head(),
-                            });
-                        }
-
-                        SimpleCompletion {
-                            kind: CompletionItemKind::MODULE,
-                            label: format!("{}", key),
-                            documentation: Some(url.clone()),
-                            sort_text: None,
-                            filter_text: None,
-                            edits,
-                        }
-                    })
+                    .map(|key| self.prefix_to_completion(key, state, range))
                     .collect();
             }
 
@@ -293,43 +371,20 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
 
                 let prefix_str = prefix.as_ref().map(|x| x.as_str()).unwrap_or("");
                 info!("Range {:?}", range);
-                self.prefixes
-                    .fetch(
-                        prefix_str,
-                        |props| {
-                            info!("Properties {}", props.len());
+                let _ =
+                    self.prefixes
+                        .fetch(
+                            prefix_str,
+                            |props| {
+                                info!("Properties {}", props.len());
 
-                            for prop in props {
-                                let new_text = format!("{}:{}", prefix_str, prop.short);
-                                let edits = vec![lsp_types::TextEdit {
-                                    new_text,
-                                    range: range.clone(),
-                                }];
-
-                                let label = match (&prop.comment, &prop.label) {
-                                    (Some(comment), Some(label)) => {
-                                        format!("{}: {}", label, comment)
-                                    }
-                                    (None, Some(label)) => label.clone(),
-                                    (Some(comment), None) => format!("{}: {}", prop.short, comment),
-                                    (None, None) => prop.short.clone(),
-                                };
-
-                                let documentation = Some(prop.id.clone());
-
-                                out.push(SimpleCompletion {
-                                    kind: prop.ty.into(),
-                                    label,
-                                    documentation,
-                                    sort_text: Some(format!("{}:{}", prefix_str, prop.short)),
-                                    filter_text: Some(format!("{}:{}", prefix_str, prop.short)),
-                                    edits,
-                                })
-                            }
-                        },
-                        |msg| client.log_message(MessageType::INFO, msg),
-                    )
-                    .await;
+                                out.extend(props.iter().map(|prop| {
+                                    self.property_to_completion(prop, prefix_str, range)
+                                }));
+                            },
+                            |msg| client.log_message(MessageType::INFO, msg),
+                        )
+                        .await;
 
                 info!("Returning {} suggestions", out.len());
 

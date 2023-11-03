@@ -10,14 +10,17 @@ pub struct Resp {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub async fn fetch(url: &str, headers: &HashMap<String, String>) -> std::result::Result<Resp, ()> {
+pub async fn fetch(
+    url: &str,
+    headers: &HashMap<String, String>,
+) -> std::result::Result<Resp, String> {
     use tracing::{debug, error};
     // TODO: This should not need to be reqwest blocking, but using the standard reqwest caused a
     // hang on `send`.
     // The same happened when testing with hyper
     // Even blocking didn't work on a later version of reqwest
 
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let builder = client.get(url);
 
     let builder = headers
@@ -25,18 +28,18 @@ pub async fn fetch(url: &str, headers: &HashMap<String, String>) -> std::result:
         .fold(builder, |builder, (k, v)| builder.header(k, v));
 
     debug!("sending blcoking");
-    let resp = match builder.send() {
+    let resp = match builder.send().await {
         Ok(x) => x,
         Err(e) => {
             error!(error = ?e);
-            return Err(());
+            return Err(e.to_string());
         }
     };
 
     let status = resp.status().as_u16();
     let headers = resp.headers().clone();
     debug!("got resp");
-    let body = resp.text().unwrap();
+    let body = resp.text().await.unwrap();
 
     Ok(Resp {
         headers,
@@ -45,8 +48,12 @@ pub async fn fetch(url: &str, headers: &HashMap<String, String>) -> std::result:
     })
 }
 
+// This cannot be programmed with reqwest, because that reqwest::Response is not Send
 #[cfg(target_arch = "wasm32")]
-pub async fn fetch(url: &str, headers: &HashMap<String, String>) -> std::result::Result<Resp, ()> {
+pub async fn fetch(
+    url: &str,
+    headers: &HashMap<String, String>,
+) -> std::result::Result<Resp, String> {
     use futures::channel::oneshot;
     let (tx, rx) = oneshot::channel();
     let _ = wasm_bindgen_futures::future_to_promise(web::local_fetch(
@@ -54,7 +61,7 @@ pub async fn fetch(url: &str, headers: &HashMap<String, String>) -> std::result:
         headers.clone(),
         tx,
     ));
-    let x = rx.await.map_err(|_| ())?;
+    let x = rx.await.map_err(|e| e.to_string())?;
     x
 }
 
@@ -76,30 +83,29 @@ mod web {
         async fn fetch(url: JsValue, options: JsValue) -> Result<JsValue, JsValue>;
     }
 
-    pub async fn local_fetch(
-        url: String,
-        headers: HashMap<String, String>,
-        tx: futures::channel::oneshot::Sender<Result<Resp, ()>>,
-    ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    pub async fn try_fetch(url: String, headers: HashMap<String, String>) -> Result<Resp, String> {
         let ser: serde_wasm_bindgen::Serializer = serde_wasm_bindgen::Serializer::json_compatible();
         let options_json = json!({ "headers": headers });
         let url = format!("https://proxy.linkeddatafragments.org/{}", url);
-        let options = ser.serialize_some(&options_json).unwrap();
+        let options = ser
+            .serialize_some(&options_json)
+            .map_err(|_| String::from("failed to serialize headers"))?;
 
-        let resp_value = fetch(url.clone().into(), options).await?;
+        let resp_value = fetch(url.clone().into(), options)
+            .await
+            .map_err(|e| format!("{:?}", e))?;
         info!("Got resp {}", url);
 
         // `resp_value` is a `Response` object.
         if !resp_value.is_instance_of::<Response>() {
-            todo!()
-            // return Err("Not a response!".into());
+            return Err("Not a response!".into());
         }
 
         let resp: Response = resp_value.dyn_into().unwrap();
         let status = resp.status();
         let headers = resp.headers();
         let headers: HashMap<String, String> =
-            serde_wasm_bindgen::from_value(headers.into()).unwrap();
+            serde_wasm_bindgen::from_value(headers.into()).map_err(|e| e.to_string())?;
 
         let mut map = HeaderMap::new();
         headers
@@ -114,20 +120,30 @@ mod web {
             });
 
         // Convert this other `Promise` into a rust `Future`.
-        let body = wasm_bindgen_futures::JsFuture::from(resp.text().unwrap())
-            .await
-            .unwrap()
-            .as_string()
-            .unwrap();
+        let body =
+            wasm_bindgen_futures::JsFuture::from(resp.text().map_err(|e| format!("{:?}", e))?)
+                .await
+                .map_err(|e| format!("{:?}", e))?
+                .as_string()
+                .ok_or(String::from("Not a string"))?;
 
         info!("Got resp {} body {}", url, body.len());
 
-        tx.send(Ok(Resp {
+        Ok(Resp {
             headers: map,
             body,
             status,
-        }))
-        .unwrap();
+        })
+    }
+
+    pub async fn local_fetch(
+        url: String,
+        headers: HashMap<String, String>,
+        tx: futures::channel::oneshot::Sender<Result<Resp, String>>,
+    ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        let resp = try_fetch(url, headers).await;
+
+        tx.send(resp).unwrap();
 
         Ok("".into())
     }

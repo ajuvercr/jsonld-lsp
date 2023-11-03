@@ -12,6 +12,11 @@ pub mod utils;
 #[cfg(feature = "web")]
 pub mod web;
 
+#[cfg(feature = "bin")]
+pub mod bare;
+#[cfg(feature = "bin")]
+pub use bare::*;
+
 #[derive(Debug, PartialEq, Clone, Hash, Eq)]
 pub struct Error {
     pub msg: String,

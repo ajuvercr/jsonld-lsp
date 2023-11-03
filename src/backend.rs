@@ -1,8 +1,9 @@
-use crate::lang::{CurrentLangState, Lang, LangState};
+use crate::lang::{CurrentLangState, Lang, LangState, Publisher};
 use crate::lsp_types::*;
 
-use crate::utils::{offset_to_position, offsets_to_range, position_to_offset};
+use crate::utils::{offsets_to_range, position_to_offset};
 
+use futures::future::join;
 use futures::lock::Mutex;
 use ropey::Rope;
 use tracing::info;
@@ -14,7 +15,7 @@ use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::LanguageServer;
 
 #[tower_lsp::async_trait]
-pub trait Client {
+pub trait Client: Clone + ClientSync {
     async fn log_message<M: Display + Sync + Send + 'static>(&self, ty: MessageType, msg: M) -> ();
     async fn publish_diagnostics(
         &self,
@@ -24,24 +25,12 @@ pub trait Client {
     ) -> ();
 }
 
-#[tower_lsp::async_trait]
-impl Client for tower_lsp::Client {
-    async fn log_message<M: Display + Sync + Send + 'static>(&self, ty: MessageType, msg: M) -> () {
-        self.log_message(ty, msg).await;
-    }
-
-    async fn publish_diagnostics(
-        &self,
-        uri: Url,
-        diags: Vec<Diagnostic>,
-        version: Option<i32>,
-    ) -> () {
-        self.publish_diagnostics(uri, diags, version).await;
-    }
+pub trait ClientSync {
+    fn spawn<O: Send + 'static, F: std::future::Future<Output = O> + Send + 'static>(&self, fut: F);
 }
 
 #[derive(Debug)]
-pub struct Backend<C: Client, L: LangState<C>> {
+pub struct Backend<C: Client + Send + Sync + 'static, L: LangState<C>> {
     pub client: C,
 
     cache: L::State,
@@ -332,7 +321,7 @@ struct TextDocumentItem {
     version: i32,
 }
 
-impl<C: Client, L: LangState<C> + Send + Sync> Backend<C, L> {
+impl<C: Client + Send + Sync + 'static, L: LangState<C> + Send + Sync> Backend<C, L> {
     pub fn new(client: C, cache: L::State) -> Self {
         Backend {
             cache,
@@ -354,30 +343,51 @@ impl<C: Client, L: LangState<C> + Send + Sync> Backend<C, L> {
 
         let (ref mut lang, ref mut state) = langs.get_mut(&id)?;
 
-        let errors = lang.update_text(&params.text, state).await;
         let rope = Rope::from_str(&params.text);
+        let (publisher, sender) = Publisher::new(
+            params.uri.clone(),
+            params.version,
+            self.client.clone(),
+            rope.clone(),
+        );
 
-        let diagnostics = errors
-            .into_iter()
-            .filter_map(|item| {
-                let (span, message) = (item.range, item.msg);
-                let start_position = offset_to_position(span.start, &rope)?;
-                let end_position = offset_to_position(span.end, &rope)?;
-                Some(Diagnostic::new_simple(
-                    Range::new(start_position, end_position),
-                    message,
-                ))
-            })
-            .collect::<Vec<_>>();
+        let fut = lang.update_text(&params.text, state, sender).await;
+        self.client.spawn(join(fut, publisher.spawn()));
+        // tokio::spawn(fut);
+        // publisher.spawn().await;
+        // let mut diagnostics = errors
+        //     .into_iter()
+        //     .filter_map(|item| {
+        //         let (span, message) = (item.range, item.msg);
+        //         let start_position = offset_to_position(span.start, &rope)?;
+        //         let end_position = offset_to_position(span.end, &rope)?;
+        //         Some(Diagnostic {
+        //             range: Range::new(start_position, end_position),
+        //             message,
+        //             severity: item.severity,
+        //             ..Default::default()
+        //         })
+        //     })
+        //     .collect::<Vec<_>>();
 
         {
             let mut ropes = self.ropes.lock().await;
             ropes.insert(id, rope);
         }
 
-        self.client
-            .publish_diagnostics(params.uri, diagnostics, Some(params.version))
-            .await;
+        // let second = diagnostics.split_off(2);
+        // self.client
+        //     .publish_diagnostics(params.uri.clone(), diagnostics, Some(params.version))
+        //     .await;
+        //
+        // let client = self.client.clone();
+        // tokio::spawn(async move {
+        //     std::thread::sleep(std::time::Duration::from_millis(3000));
+        //     // Process each socket concurrently.
+        //     client
+        //         .publish_diagnostics(params.uri, second, Some(params.version))
+        //         .await;
+        // });
 
         Some(())
     }
