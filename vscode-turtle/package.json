@@ -8,9 +8,9 @@
 	"version": "0.0.2",
 	"repository": "https://github.com/ajuvercr/jsonld-lsp/",
 	"categories": [
-    "Programming Languages",
-    "Languages",
-    "Formatters",
+		"Programming Languages",
+		"Languages",
+		"Formatters",
 		"Other"
 	],
 	"engines": {
@@ -20,23 +20,24 @@
 		"onLanguage:turtle"
 	],
 	"browser": "./client/dist/browserClientMain",
-  "configurationDefaults": {
-    "[turtle]": {
-      "editor.semanticHighlighting.enabled": true
-    }
-  },
+	"configurationDefaults": {
+		"[turtle]": {
+			"editor.semanticHighlighting.enabled": true
+		}
+	},
 	"contributes": {
-    "semanticTokenTypes": [
-      {
-        "id": "langTag",
-        "superType": "decorator",
-        "description": "Denoting the language of the literal"
-      }, {
-        "id": "boolean",
-        "superType": "number",
-        "description": "Boolean literal"
-      }
-    ],
+		"semanticTokenTypes": [
+			{
+				"id": "langTag",
+				"superType": "decorator",
+				"description": "Denoting the language of the literal"
+			},
+			{
+				"id": "boolean",
+				"superType": "number",
+				"description": "Boolean literal"
+			}
+		],
 		"languages": [
 			{
 				"id": "turtle",
@@ -68,7 +69,7 @@
 		]
 	},
 	"scripts": {
-    "publish": "vsce publish --baseImagesUrl https://raw.githubusercontent.com/ajuvercr/jsonld-lsp/main/vscode-turtle/",
+		"publish": "vsce publish --baseImagesUrl https://raw.githubusercontent.com/ajuvercr/jsonld-lsp/main/vscode-turtle/",
 		"vscode:prepublish": "npm run compile",
 		"compile": "webpack",
 		"watch": "webpack --watch",
@@ -78,6 +79,7 @@
 		"chrome": "npm run compile && vscode-test-web --browserType=chromium --extensionDevelopmentPath=. ./test-data"
 	},
 	"devDependencies": {
+		"@types/node": "^20.8.10",
 		"@typescript-eslint/eslint-plugin": "^5.42.0",
 		"@typescript-eslint/parser": "^5.42.0",
 		"@vscode/test-web": "^0.0.22",

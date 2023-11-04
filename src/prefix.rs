@@ -23,7 +23,7 @@ pub enum PropertyType {
     Property,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Property {
     pub id: String,
     pub short: String,
@@ -105,7 +105,8 @@ const PROPERTIES: &'static [(&'static str, PropertyType)] = &[
     ),
 ];
 
-fn extract_properties(turtle: Turtle, prefix: &str) -> Vec<Property> {
+#[tracing::instrument(skip(turtle))]
+fn extract_properties(turtle: &Turtle, prefix: &str, base: &str) -> Vec<Property> {
     info!( triples = turtle.triples.len(), ?turtle.base);
     let mut triples: Vec<Triple> = Vec::new();
 
@@ -115,7 +116,8 @@ fn extract_properties(turtle: Turtle, prefix: &str) -> Vec<Property> {
         let subject = match &triple.subject.0 {
             turtle::Subject::BlankNode(BlankNode::Named(x)) => x.clone(),
             turtle::Subject::NamedNode(n) => {
-                if let Some(x) = n.expand(&turtle) {
+                if let Some(x) = n.expand(&turtle, base) {
+                    info!("subject {:?} -> {}", n, x);
                     x
                 } else {
                     continue;
@@ -125,13 +127,13 @@ fn extract_properties(turtle: Turtle, prefix: &str) -> Vec<Property> {
         };
 
         for po in &triple.po {
-            if let Some(pred) = po.predicate.expand(&turtle) {
+            if let Some(pred) = po.predicate.expand(&turtle, base) {
                 for ob in &po.object {
                     let object = match &ob.0 {
                         turtle::Term::Literal(s) => s.plain_string(),
                         turtle::Term::BlankNode(BlankNode::Named(x)) => x.clone(),
                         turtle::Term::NamedNode(n) => {
-                            if let Some(o) = n.expand(&turtle) {
+                            if let Some(o) = n.expand(&turtle, base) {
                                 o
                             } else {
                                 continue;
@@ -151,6 +153,7 @@ fn extract_properties(turtle: Turtle, prefix: &str) -> Vec<Property> {
         }
     }
 
+    let prefix_url = lsp_types::Url::parse(prefix);
     info!(?turtle.base, triples = triples.len());
 
     let mut properties = Vec::new();
@@ -167,7 +170,18 @@ fn extract_properties(turtle: Turtle, prefix: &str) -> Vec<Property> {
         }
         found.insert(id.clone());
 
-        let short = id[prefix.len()..].to_string();
+        let short = if let Some(short) = id.strip_prefix(prefix) {
+            short.to_string()
+        } else {
+            match (lsp_types::Url::parse(&id), &prefix_url) {
+                (Ok(id_url), Ok(prefix_url)) => prefix_url
+                    .make_relative(&id_url)
+                    .unwrap_or_else(|| id[prefix.len()..].to_string()),
+                _ => id[prefix.len()..].to_string(),
+            }
+        };
+
+        info!("Crash result {}", short);
 
         let label = triples
             .iter()
@@ -199,9 +213,7 @@ fn extract_properties(turtle: Turtle, prefix: &str) -> Vec<Property> {
 impl Prefixes {
     pub async fn new() -> Option<Prefixes> {
         let headers = [].into();
-        info!("Fetching");
         let resp = fetch("http://prefix.cc/context", &headers).await.ok()?;
-        info!("Fetched");
 
         let context: HashMap<String, HashMap<String, String>> =
             serde_json::from_str(&resp.body).ok()?;
@@ -219,6 +231,23 @@ impl Prefixes {
 
     pub fn get_all<'a>(&'a self) -> impl Iterator<Item = &'a str> {
         self.names.keys().map(|x| x.as_str())
+    }
+
+    pub async fn update<'a>(
+        &'a self,
+        url: &str,
+        turtle: &Turtle,
+        alias: Option<&str>,
+        f: impl FnOnce(&[Property]),
+    ) {
+        let properties = extract_properties(turtle, url, url);
+        f(&properties);
+
+        let mut props = self.properties.lock().await;
+        if let Some(alias) = alias {
+            props.insert(alias.to_string(), Ok(properties.clone()));
+        }
+        props.insert(url.to_string(), Ok(properties));
     }
 
     pub async fn fetch<'a>(
@@ -239,7 +268,6 @@ impl Prefixes {
                 f(out.as_ref()?);
                 return Ok(());
             }
-            info!("Should drop props");
             drop(props);
             // Drop props lock before the request
         }
@@ -270,23 +298,22 @@ impl Prefixes {
         };
 
         // Parse the turtle
-        let properties = parse(&resp.body, &url).map(|x| extract_properties(x, url));
-
-        let out = match properties.as_ref() {
-            Ok(p) => {
+        let out = match parse(&resp.body, &url) {
+            Ok(turtle) => {
                 msg(format!("Parse successful {}", url,)).await;
-                f(&p);
+                let base = turtle.get_base(url);
+                let alias = (base.to_string() != url).then_some(base);
+                self.update(url, &turtle, alias.as_ref().map(|x| x.as_str()), f)
+                    .await;
                 Ok(())
             }
-            Err(e) => {
+            Err(s) => {
                 msg(format!("Failed to parse {}", url,)).await;
-                Err(e.clone())
+                let mut props = self.properties.lock().await;
+                props.insert(url.to_string(), Err(s.clone()));
+                Err(s)
             }
         };
-
-        info!("Locking properties");
-        let mut props = self.properties.lock().await;
-        props.insert(url.to_string(), properties);
 
         out
     }

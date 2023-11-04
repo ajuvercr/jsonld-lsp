@@ -173,11 +173,7 @@ pub fn turtle() -> impl Parser<Token, Turtle, Error = Simple<Token>> {
             }
         }
 
-        Turtle {
-            base,
-            prefixes,
-            triples,
-        }
+        Turtle::new(base, prefixes, triples)
     })
 }
 

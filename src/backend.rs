@@ -353,41 +353,11 @@ impl<C: Client + Send + Sync + 'static, L: LangState<C> + Send + Sync> Backend<C
 
         let fut = lang.update_text(&params.text, state, sender).await;
         self.client.spawn(join(fut, publisher.spawn()));
-        // tokio::spawn(fut);
-        // publisher.spawn().await;
-        // let mut diagnostics = errors
-        //     .into_iter()
-        //     .filter_map(|item| {
-        //         let (span, message) = (item.range, item.msg);
-        //         let start_position = offset_to_position(span.start, &rope)?;
-        //         let end_position = offset_to_position(span.end, &rope)?;
-        //         Some(Diagnostic {
-        //             range: Range::new(start_position, end_position),
-        //             message,
-        //             severity: item.severity,
-        //             ..Default::default()
-        //         })
-        //     })
-        //     .collect::<Vec<_>>();
 
         {
             let mut ropes = self.ropes.lock().await;
             ropes.insert(id, rope);
         }
-
-        // let second = diagnostics.split_off(2);
-        // self.client
-        //     .publish_diagnostics(params.uri.clone(), diagnostics, Some(params.version))
-        //     .await;
-        //
-        // let client = self.client.clone();
-        // tokio::spawn(async move {
-        //     std::thread::sleep(std::time::Duration::from_millis(3000));
-        //     // Process each socket concurrently.
-        //     client
-        //         .publish_diagnostics(params.uri, second, Some(params.version))
-        //         .await;
-        // });
 
         Some(())
     }

@@ -8,8 +8,8 @@ import { DidChangeTextDocumentParams, DidSaveTextDocumentParams, DidOpenTextDocu
 
 type Diagnostics = { diagnostics: Diagnostic[]; uri: string };
 type SetDiagnosticsFn = (diagnostics: Diagnostics) => void;
-
 type SetLoggerFn = (msg: string) => void;
+type SetReadFileFn = (url: string) => Promise<string>;
 "#;
 
 #[wasm_bindgen]
@@ -49,6 +49,10 @@ extern "C" {
 
     #[wasm_bindgen(typescript_type = "SetLoggerFn")]
     pub type SetLoggerFn;
+
+    #[wasm_bindgen(typescript_type = "SetReadFileFn")]
+    pub type SetReadFileFn;
+
 
     #[wasm_bindgen(typescript_type = "DocumentFormattingParams")]
     pub type DocumentFormattingParams;

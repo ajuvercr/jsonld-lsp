@@ -1,4 +1,5 @@
 use hashbrown::HashSet;
+use tracing::info;
 
 use super::token::StringStyle;
 use crate::model::Spanned;
@@ -69,9 +70,15 @@ pub enum NamedNode {
     Invalid,
 }
 impl NamedNode {
-    pub fn expand(&self, turtle: &Turtle) -> Option<String> {
-        self.expand_step(turtle, HashSet::new())
+    pub fn expand(&self, turtle: &Turtle, base: &str) -> Option<String> {
+        let base = turtle.get_base(base);
+        let out = self.expand_step(turtle, HashSet::new())?;
+
+        let url = base.join(&out).ok()?;
+
+        Some(url.to_string())
     }
+
     fn expand_step<'a>(&'a self, turtle: &Turtle, mut done: HashSet<&'a str>) -> Option<String> {
         match self {
             Self::Full(s) => s.clone().into(),
@@ -240,8 +247,48 @@ impl Display for Prefix {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Turtle {
     pub base: Option<Spanned<Base>>,
+    set_base: Option<lsp_types::Url>,
     pub prefixes: Vec<Spanned<Prefix>>,
     pub triples: Vec<Spanned<Triple>>,
+}
+
+impl Turtle {
+    pub fn new(
+        base: Option<Spanned<Base>>,
+        prefixes: Vec<Spanned<Prefix>>,
+        triples: Vec<Spanned<Triple>>,
+    ) -> Self {
+        Self {
+            base,
+            prefixes,
+            triples,
+            set_base: None,
+        }
+    }
+    pub fn set_base(&mut self, location: &str) {
+        let location_url = lsp_types::Url::parse(location).unwrap();
+
+        let base = self
+            .base
+            .as_ref()
+            .and_then(|base| match base.0 .1.value() {
+                NamedNode::Full(s) => Some(
+                    location_url
+                        .join(s.as_str())
+                        .map(|x| x.to_string())
+                        .unwrap_or(s.to_string()),
+                ),
+                _ => None,
+            })
+            .unwrap_or(location.to_string());
+
+        self.set_base = lsp_types::Url::parse(&base).ok();
+    }
+    pub fn get_base(&self, location: &str) -> lsp_types::Url {
+        self.set_base
+            .clone()
+            .unwrap_or_else(|| lsp_types::Url::parse(location).unwrap())
+    }
 }
 
 impl Display for Turtle {

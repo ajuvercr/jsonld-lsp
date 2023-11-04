@@ -20,10 +20,13 @@ import {
 import init, {
   set_diags,
   set_logger,
+  set_read_file,
   turtle_backend,
   TurtleWebBackend,
   WebClient,
 } from "jsonld-language-server";
+import { sign } from "crypto";
+// import { readFile } from "fs/promises";
 
 let server: undefined | TurtleWebBackend;
 
@@ -46,13 +49,54 @@ function publish_diagnostics(diags: any) {
   connection.sendDiagnostics(diags);
 }
 
-
+type CustomEvent = {
+  ty: "readFile";
+  path: string;
+  body?: string;
+  id: string;
+};
+let filesRead = 0;
 connection.onInitialize(async (params: InitializeParams) => {
   console.log("init params " + JSON.stringify(params, undefined, 2));
   await init();
 
   set_logger(log_message);
   set_diags(publish_diagnostics);
+  set_read_file((loc: string) => {
+    return new Promise((res) => {
+      console.log("Reading file!", loc);
+      let id = filesRead + "";
+      filesRead += 1;
+      const data: CustomEvent = {
+        id,
+        path: loc,
+        ty: "readFile",
+      };
+      // const body = await readFile(loc, { encoding: "utf8" });
+      const controller = new AbortController();
+      const signal = controller.signal;
+
+      addEventListener(
+        "message",
+        (msg) => {
+          console.log("Got message! " + JSON.stringify(msg.data));
+          try {
+            const data: CustomEvent = msg.data;
+            if (data.ty == "readFile" && data.id == id) {
+              console.log("Got file!");
+              controller.abort();
+              msg.stopPropagation();
+              msg.stopImmediatePropagation();
+              res(data.body!);
+            }
+          } catch (ex: any) {}
+        },
+        { signal },
+      );
+
+      postMessage(JSON.stringify(data));
+    });
+  });
 
   connection.console.log("Callbacks set!");
 
@@ -89,7 +133,7 @@ connection.onDidOpenTextDocument(async (x: DidOpenTextDocumentParams) => {
 connection.onCompletion(async (position: TextDocumentPositionParams) => {
   connection.console.log("On completion!");
   const completionRes = await server?.completion(position);
-  connection.console.log("Completion resp! " +  JSON.stringify(completionRes));
+  connection.console.log("Completion resp! " + JSON.stringify(completionRes));
   return completionRes;
 });
 

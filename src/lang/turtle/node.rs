@@ -195,29 +195,20 @@ impl ParentingSystem<Spanned<Node>> {
         children
     }
 
-    pub fn new_turtle(
-        Spanned(
-            Turtle {
-                base,
-                prefixes,
-                triples,
-            },
-            span,
-        ): Spanned<Turtle>,
-    ) -> Self {
+    pub fn new_turtle(Spanned(turtle, span): Spanned<Turtle>) -> Self {
         let mut this = Self::new();
         let root_id = this.increment(0);
         let mut root = Vec::new();
 
-        if let Some(b) = base {
+        if let Some(b) = turtle.base {
             root.push(this.add_base(b, root_id));
         }
 
-        for prefix in prefixes {
+        for prefix in turtle.prefixes {
             root.push(this.add_prefix(prefix, root_id));
         }
 
-        for triple in triples {
+        for triple in turtle.triples {
             root.push(this.add_triple(triple, root_id));
         }
 

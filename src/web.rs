@@ -17,6 +17,7 @@ use crate::backend::Backend;
 const SER: serde_wasm_bindgen::Serializer = serde_wasm_bindgen::Serializer::json_compatible();
 static mut LOG_FN: Option<js_sys::Function> = None;
 static mut DIAGS_FN: Option<js_sys::Function> = None;
+static mut READ_FN: Option<js_sys::Function> = None;
 
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
@@ -92,6 +93,35 @@ pub fn set_diags(f: wt::SetDiagnosticsFn) {
     unsafe {
         let jsvalue: JsValue = f.into();
         DIAGS_FN = Some(jsvalue.unchecked_into());
+    }
+}
+
+#[wasm_bindgen]
+pub fn set_read_file(f: wt::SetReadFileFn) {
+    unsafe {
+        let jsvalue: JsValue = f.into();
+        READ_FN = Some(jsvalue.unchecked_into());
+    }
+}
+
+pub async fn read_file(location: &str) -> Result<String, String> {
+    unsafe {
+        let this = JsValue::null();
+        if let Some(f) = &READ_FN {
+            let fut = f
+                .call1(&this, &location.into())
+                .map_err(|e| format!("{:?}", e))?;
+
+            let body = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::from(fut))
+                .await
+                .map_err(|e| format!("{:?}", e))?
+                .as_string()
+                .ok_or(String::from("Not a string"))?;
+
+            return Ok(body);
+        } else {
+            return Err("Not set!".to_string());
+        }
     }
 }
 

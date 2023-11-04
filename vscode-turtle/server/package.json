@@ -15,5 +15,8 @@
 		"jsonld-language-server": "file:../../pkg",
 		"vscode-languageserver": "^8.1.0"
 	},
+	"devDependencies": {
+		"@types/vscode": "^1.52.0"
+	},
 	"scripts": {}
 }

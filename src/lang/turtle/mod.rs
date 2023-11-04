@@ -157,9 +157,10 @@ impl Lang for TurtleLang {
             .map_with_span(spanned)
             .then_ignore(end().recover_with(skip_then_retry_until([])));
 
-        let (json, json_errors) = parser.parse_recovery(stream);
-        if let Some(ttl) = &json {
-            info!("triples {}", ttl.triples.len())
+        let (mut json, json_errors) = parser.parse_recovery(stream);
+        if let Some(ref mut ttl) = &mut json {
+            info!("triples {}", ttl.triples.len());
+            ttl.0.set_base(&self.id);
         }
 
         (
@@ -170,9 +171,6 @@ impl Lang for TurtleLang {
 
     fn parents(&self, _element: &Spanned<Self::Element>) -> ParentingSystem<Spanned<Self::Node>> {
         ParentingSystem::new()
-        // let p = ParentingSystem::new_turtle(element.clone());
-        //
-        // p
     }
 
     fn special_semantic_tokens(
@@ -208,60 +206,13 @@ impl Lang for TurtleLang {
     fn new(id: String, state: Self::State) -> (Self, CurrentLangState<Self>) {
         (
             TurtleLang {
-                id,
+                id: format!("{}", id),
                 rope: Rope::new(),
                 comments: Vec::new(),
                 prefixes: state.clone(),
             },
             Default::default(),
         )
-    }
-
-    fn post_update_diagnostics(
-        &self,
-        state: &CurrentLangState<Self>,
-        sender: DiagnosticSender,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
-        let prefixes = self.prefixes.clone();
-        let turtle = &state.element.current;
-        let prefixes_ids: Vec<_> = turtle
-            .prefixes
-            .iter()
-            .flat_map(|Spanned(ref prefix, ref span)| {
-                prefix
-                    .value
-                    .expand(turtle)
-                    .map(|pref| Spanned(pref, span.clone()))
-            })
-            .collect();
-        async move {
-            info!("Post update start");
-
-            // Rust please
-            let sender = &sender;
-            let prefixes = &prefixes;
-
-            prefixes_ids
-                .into_iter()
-                .map(|prefix| async move {
-                    if let Err(e) = prefixes
-                        .fetch(&prefix, |_| {}, |_msg| async {}.boxed())
-                        .await
-                    {
-                        info!("sending diagnostic, {} ", prefix.value());
-                        sender.push(SimpleDiagnostic::new_severity(
-                            prefix.span().clone(),
-                            format!("Failed to fetch prefix: {}", e),
-                            DiagnosticSeverity::WARNING,
-                        ));
-                    }
-                })
-                .collect::<FuturesUnordered<_>>()
-                .count()
-                .await;
-            info!("Post update end");
-        }
-        .boxed()
     }
 }
 
@@ -343,6 +294,64 @@ impl TurtleLang {
 
 #[async_trait::async_trait]
 impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
+    async fn post_update_diagnostics(
+        &self,
+        state: &CurrentLangState<Self>,
+        sender: DiagnosticSender,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+        let prefixes = self.prefixes.clone();
+        let turtle = &state.element.current;
+        let prefixes_ids: Vec<_> = turtle
+            .prefixes
+            .iter()
+            .flat_map(|Spanned(ref prefix, ref span)| {
+                prefix
+                    .value
+                    .expand(turtle, &self.id)
+                    .map(|pref| Spanned(pref, span.clone()))
+            })
+            .collect();
+
+        if state.element.last_is_valid() {
+            let base = turtle.get_base(&self.id);
+            info!("Updating prefixes for {} and {}", base, self.id);
+            prefixes
+                .update(
+                    base.as_str(),
+                    turtle,
+                    Some(&format!("{}#", self.id)),
+                    |_| {},
+                )
+                .await;
+        }
+
+        async move {
+            // Rust please
+            let sender = &sender;
+            let prefixes = &prefixes;
+
+            prefixes_ids
+                .into_iter()
+                .map(|prefix| async move {
+                    if let Err(e) = prefixes
+                        .fetch(&prefix, |_| {}, |_msg| async {}.boxed())
+                        .await
+                    {
+                        info!("sending diagnostic, {} ", prefix.value());
+                        sender.push(SimpleDiagnostic::new_severity(
+                            prefix.span().clone(),
+                            format!("Failed to fetch prefix: {}", e),
+                            DiagnosticSeverity::WARNING,
+                        ));
+                    }
+                })
+                .collect::<FuturesUnordered<_>>()
+                .count()
+                .await;
+        }
+        .boxed()
+    }
+
     async fn update(&mut self, _state: &CurrentLangState<Self>) {}
 
     async fn do_semantic_tokens(
@@ -390,7 +399,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                     .iter()
                     .find(|x| x.prefix.as_str() == prefix_str)
                 {
-                    prefix.value.expand(turtle)
+                    prefix.value.expand(turtle, &self.id)
                 } else {
                     self.prefixes.get(prefix_str).map(String::from)
                 };

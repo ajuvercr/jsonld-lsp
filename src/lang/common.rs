@@ -247,24 +247,24 @@ pub trait Lang: Sized {
     ) -> Result<Vec<(std::ops::Range<usize>, String)>, Self::RenameError>;
 
     fn new(id: String, state: Self::State) -> (Self, CurrentLangState<Self>);
+}
 
-    fn post_update_diagnostics(
+#[async_trait::async_trait]
+pub trait LangState<C: Client + Send + Sync + 'static>: Lang 
+where
+    Self: Sized + Send + Sync,
+{
+    async fn update(&mut self, parents: &CurrentLangState<Self>);
+
+    async fn do_semantic_tokens(&mut self, state: &CurrentLangState<Self>) -> Vec<SemanticToken>;
+
+    async fn post_update_diagnostics(
         &self,
         _state: &CurrentLangState<Self>,
         _sender: DiagnosticSender,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
         async {}.boxed()
     }
-}
-
-#[async_trait::async_trait]
-pub trait LangState<C: Client + Send + Sync + 'static>: Lang
-where
-    Self: Sized,
-{
-    async fn update(&mut self, parents: &CurrentLangState<Self>);
-
-    async fn do_semantic_tokens(&mut self, state: &CurrentLangState<Self>) -> Vec<SemanticToken>;
 
     async fn update_text(
         &mut self,
@@ -309,7 +309,7 @@ where
                 .collect(),
         );
 
-        self.post_update_diagnostics(state, sender)
+        self.post_update_diagnostics(state, sender).await
     }
 
     async fn do_completion(

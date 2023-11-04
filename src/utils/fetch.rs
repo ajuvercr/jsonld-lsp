@@ -14,11 +14,27 @@ pub async fn fetch(
     url: &str,
     headers: &HashMap<String, String>,
 ) -> std::result::Result<Resp, String> {
-    use tracing::{debug, error};
-    // TODO: This should not need to be reqwest blocking, but using the standard reqwest caused a
-    // hang on `send`.
-    // The same happened when testing with hyper
-    // Even blocking didn't work on a later version of reqwest
+    use tokio::{fs::File, io::AsyncReadExt};
+    use tracing::{debug, error, info};
+
+    let url = reqwest::Url::parse(url).map_err(|_| String::from("invalid url!"))?;
+    info!("Found url {} {}", url.scheme(), url);
+    if url.scheme() == "file" {
+        let mut file = File::open(url.path())
+            .await
+            .map_err(|_| format!("File not found {}", url.path()))?;
+        let mut body = String::new();
+        file.read_to_string(&mut body)
+            .await
+            .map_err(|_| format!("Failed to read file"))?;
+        let status = 200;
+        let headers = HeaderMap::new();
+        return Ok(Resp {
+            headers,
+            body,
+            status,
+        });
+    }
 
     let client = reqwest::Client::new();
     let builder = client.get(url);
@@ -70,7 +86,11 @@ mod web {
     use std::collections::HashMap;
 
     use crate::utils::Resp;
-    use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+    use crate::web::read_file;
+    use reqwest::{
+        header::{HeaderMap, HeaderName, HeaderValue},
+        Url,
+    };
     use serde::Serializer;
     use serde_json::json;
     use tracing::info;
@@ -84,6 +104,20 @@ mod web {
     }
 
     pub async fn try_fetch(url: String, headers: HashMap<String, String>) -> Result<Resp, String> {
+        if let Ok(url) = Url::parse(&url) {
+            if url.scheme() == "file" {
+                info!("Url scheme is file, let's do that! {}", url.path());
+                let body = read_file(url.path()).await?;
+                let status = 200;
+                let headers = HeaderMap::new();
+                return Ok(Resp {
+                    headers,
+                    body,
+                    status,
+                });
+            }
+        }
+
         let ser: serde_wasm_bindgen::Serializer = serde_wasm_bindgen::Serializer::json_compatible();
         let options_json = json!({ "headers": headers });
         let url = format!("https://proxy.linkeddatafragments.org/{}", url);
@@ -148,4 +182,3 @@ mod web {
         Ok("".into())
     }
 }
-
