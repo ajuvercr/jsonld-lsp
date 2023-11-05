@@ -4,8 +4,9 @@ use chumsky::prelude::Simple;
 use futures::FutureExt;
 use futures::{channel::mpsc, StreamExt};
 use lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionTextEdit, Diagnostic, DiagnosticSeverity,
-    Documentation, FormattingOptions, Position, SemanticToken, SemanticTokenType, TextEdit, Url,
+    CodeActionResponse, CompletionItem, CompletionItemKind, CompletionTextEdit, Diagnostic,
+    DiagnosticSeverity, Documentation, FormattingOptions, Position, SemanticToken,
+    SemanticTokenType, TextEdit, Url,
 };
 use ropey::Rope;
 use tracing::debug;
@@ -247,10 +248,19 @@ pub trait Lang: Sized {
     ) -> Result<Vec<(std::ops::Range<usize>, String)>, Self::RenameError>;
 
     fn new(id: String, state: Self::State) -> (Self, CurrentLangState<Self>);
+
+    fn code_action(
+        &self,
+        _state: &CurrentLangState<Self>,
+        _pos: Range<usize>,
+        _uri: &lsp_types::Url,
+    ) -> Option<CodeActionResponse> {
+        None
+    }
 }
 
 #[async_trait::async_trait]
-pub trait LangState<C: Client + Send + Sync + 'static>: Lang 
+pub trait LangState<C: Client + Send + Sync + 'static>: Lang
 where
     Self: Sized + Send + Sync,
 {

@@ -59,6 +59,7 @@ where
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
                     trigger_characters: Some(triggers),
@@ -99,6 +100,34 @@ where
                 ..ServerCapabilities::default()
             },
         })
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let range = params.range;
+        let uri = params.text_document.uri;
+
+        let rope = {
+            let ropes = self.ropes.lock().await;
+            if let Some(rope) = ropes.get(uri.as_str()) {
+                rope.clone()
+            } else {
+                return Ok(None);
+            }
+        };
+        let mut langs = self.langs.lock().await;
+
+        if let Some((ref mut lang, ref mut state)) = langs.get_mut(uri.as_str()) {
+            let start = position_to_offset(range.start, &rope)
+                .ok_or(Error::new(ErrorCode::InvalidRequest))?;
+            let end = position_to_offset(range.end, &rope)
+                .ok_or(Error::new(ErrorCode::InvalidRequest))?;
+            if let Some(t) = lang.code_action(state, start..end, &uri) {
+                return Ok(Some(t));
+            }
+        }
+
+        Ok(None)
     }
 
     #[tracing::instrument(skip(self))]

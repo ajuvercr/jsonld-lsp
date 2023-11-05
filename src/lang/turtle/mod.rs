@@ -6,10 +6,10 @@ mod token;
 pub mod tokenizer;
 use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
 use lsp_types::{
-    CompletionItemKind, DiagnosticSeverity, FormattingOptions, MessageType, Position,
-    SemanticTokenType,
+    CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionResponse, CompletionItemKind,
+    DiagnosticSeverity, FormattingOptions, MessageType, Position, SemanticTokenType,
 };
-use std::ops::Range;
+use std::{collections::HashSet, ops::Range};
 use tracing::info;
 
 use chumsky::{prelude::Simple, primitive::end, recovery::skip_then_retry_until, Parser};
@@ -49,6 +49,7 @@ pub struct TurtleLang {
     id: String,
     rope: Rope,
     comments: Vec<Spanned<String>>,
+    defined_prefixes: HashSet<String>,
     prefixes: Prefixes,
 }
 
@@ -169,6 +170,70 @@ impl Lang for TurtleLang {
         )
     }
 
+    fn code_action(
+        &self,
+        state: &CurrentLangState<Self>,
+        pos: Range<usize>,
+        uri: &lsp_types::Url,
+    ) -> Option<CodeActionResponse> {
+        let mut seen = HashSet::new();
+        let mut actions: Vec<(String, Vec<lsp_types::TextEdit>)> = self
+            .get_undefined_prefixes(
+                state,
+                move |span, prefix| {
+                    if pos.contains(&span.start)
+                        || pos.contains(&span.end)
+                        || (pos.start > span.start && pos.end < span.end)
+                    {
+                        if !seen.contains(prefix) {
+                            seen.insert(prefix.to_string());
+                            return true;
+                        }
+                    }
+                    false
+                },
+                |x| x,
+            )
+            .into_iter()
+            .filter_map(|x| {
+                let target = self.prefixes.get(&x.prefix)?;
+
+                let edits = vec![lsp_types::TextEdit {
+                    new_text: format!("@prefix {}: <{}>.\n", x.prefix, target),
+                    range: head(),
+                }];
+                Some((format!("Add '{}' prefix", x.prefix), edits))
+            })
+            .collect();
+
+        if actions.len() > 1 {
+            actions.insert(
+                0,
+                (
+                    "Fix all prefixes".into(),
+                    actions.iter().map(|(_, e)| e.clone()).flatten().collect(),
+                ),
+            );
+        }
+
+        let actions = actions
+            .into_iter()
+            .map(|(title, edits)| CodeAction {
+                title,
+                kind: Some(CodeActionKind::QUICKFIX),
+                edit: Some(lsp_types::WorkspaceEdit {
+                    changes: Some([(uri.clone(), edits)].into()),
+                    document_changes: None,
+                    change_annotations: None,
+                }),
+                ..Default::default()
+            })
+            .map(CodeActionOrCommand::CodeAction)
+            .collect();
+
+        Some(actions)
+    }
+
     fn parents(&self, _element: &Spanned<Self::Element>) -> ParentingSystem<Spanned<Self::Node>> {
         ParentingSystem::new()
     }
@@ -209,6 +274,7 @@ impl Lang for TurtleLang {
                 id: format!("{}", id),
                 rope: Rope::new(),
                 comments: Vec::new(),
+                defined_prefixes: HashSet::new(),
                 prefixes: state.clone(),
             },
             Default::default(),
@@ -290,6 +356,49 @@ impl TurtleLang {
             edits,
         }
     }
+    fn get_undefined_prefixes<O, F: Fn(UndefinedPrefix) -> O>(
+        &self,
+        state: &CurrentLangState<Self>,
+        mut contains: impl FnMut(&Range<usize>, &str) -> bool,
+        f: F,
+    ) -> Vec<O> {
+        state
+            .tokens
+            .current
+            .iter()
+            .filter_map(|x| match &x.0 {
+                Token::PNameLN(s, _) => {
+                    let prefix = s.as_deref().unwrap_or("");
+                    if contains(x.span(), prefix)
+                        && !self.defined_prefixes.contains(s.as_deref().unwrap_or(""))
+                    {
+                        let prefix = prefix.to_string();
+                        Some(UndefinedPrefix {
+                            prefix,
+                            range: x.span().clone(),
+                        })
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            })
+            // .filter(|x| {
+            //     if !seen.contains(&x.prefix) {
+            //         seen.insert(x.prefix.clone());
+            //         return true;
+            //     } else {
+            //         false
+            //     }
+            // })
+            .map(f)
+            .collect()
+    }
+}
+
+struct UndefinedPrefix {
+    prefix: String,
+    range: Range<usize>,
 }
 
 #[async_trait::async_trait]
@@ -299,6 +408,20 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
         state: &CurrentLangState<Self>,
         sender: DiagnosticSender,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+        let undefined_prefixes = self.get_undefined_prefixes(
+            state,
+            |_, _| true,
+            |UndefinedPrefix { prefix, range }| {
+                SimpleDiagnostic::new_severity(
+                    range,
+                    format!("Prefix {} not defined", prefix),
+                    DiagnosticSeverity::ERROR,
+                )
+            },
+        );
+
+        sender.push_all(undefined_prefixes);
+
         let prefixes = self.prefixes.clone();
         let turtle = &state.element.current;
         let prefixes_ids: Vec<_> = turtle
@@ -352,7 +475,14 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
         .boxed()
     }
 
-    async fn update(&mut self, _state: &CurrentLangState<Self>) {}
+    async fn update(&mut self, state: &CurrentLangState<Self>) {
+        if state.element.last_is_valid() {
+            self.defined_prefixes = HashSet::new();
+            for pref in &state.element.current.prefixes {
+                self.defined_prefixes.insert(pref.prefix.0.clone());
+            }
+        }
+    }
 
     async fn do_semantic_tokens(
         &mut self,

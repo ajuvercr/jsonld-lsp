@@ -211,13 +211,34 @@ fn extract_properties(turtle: &Turtle, prefix: &str, base: &str) -> Vec<Property
 }
 
 impl Prefixes {
-    pub async fn new() -> Option<Prefixes> {
+    async fn fetch_prefix() -> Option<HashMap<String, String>> {
         let headers = [].into();
         let resp = fetch("http://prefix.cc/context", &headers).await.ok()?;
 
         let context: HashMap<String, HashMap<String, String>> =
             serde_json::from_str(&resp.body).ok()?;
         let names = context.into_iter().find(|x| x.0 == "@context")?.1;
+
+        Some(names)
+    }
+
+    fn default_prefix() -> HashMap<String, String> {
+        let mut out = HashMap::new();
+        for (k, v) in [
+            ("xsd", "http://www.w3.org/2001/XMLSchema#"),
+            ("rdfs", "http://www.w3.org/2000/01/rdf-schema#"),
+            ("rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#"),
+        ] {
+            out.insert(k.to_string(), v.to_string());
+        }
+
+        out
+    }
+
+    pub async fn new() -> Option<Prefixes> {
+        let names = Self::fetch_prefix()
+            .await
+            .unwrap_or_else(Self::default_prefix);
 
         Some(Prefixes {
             names: names.into(),
