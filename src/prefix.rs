@@ -11,7 +11,7 @@ use crate::{
 };
 use chumsky::{primitive::end, recovery::skip_then_retry_until, Parser};
 use futures::lock::Mutex;
-use lsp_types::CompletionItemKind;
+use lsp_types::{lsp_request, CompletionItemKind};
 use tracing::info;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -230,9 +230,11 @@ impl Prefixes {
     }
 
     pub async fn new() -> Option<Prefixes> {
-        let names = Self::fetch_prefix()
-            .await
-            .unwrap_or_else(Self::default_prefix);
+        // let names = Self::fetch_prefix()
+        //     .await
+        //     .unwrap_or_else(Self::default_prefix);
+
+        let names = Self::default_prefix();
 
         Some(Prefixes {
             names: names.into(),
@@ -262,6 +264,7 @@ impl Prefixes {
         if let Some(alias) = alias {
             props.insert(alias.to_string(), Ok(properties.clone()));
         }
+
         props.insert(url.to_string(), Ok(properties));
     }
 
@@ -274,20 +277,36 @@ impl Prefixes {
         {
             let props = self.properties.lock().await;
             if let Some(out) = props.get(url) {
-                msg(format!(
+                info!(
                     "Found properties for {} in cache (found = {})",
                     url,
                     out.is_ok()
-                ))
-                .await;
+                );
                 f(out.as_ref()?);
                 return Ok(());
             }
-            drop(props);
-            // Drop props lock before the request
+        }
+
+        if let Ok(mut url_parsed) = lsp_types::Url::parse(url) {
+            url_parsed.set_fragment(None);
+            url_parsed.set_query(None);
+            {
+                let url_str = url_parsed.to_string();
+                let props = self.properties.lock().await;
+                if let Some(out) = props.get(&url_str) {
+                    info!(
+                        "Found properties for {} in cache (found = {})",
+                        url,
+                        out.is_ok()
+                    );
+                    f(out.as_ref()?);
+                    return Ok(());
+                }
+            }
         }
 
         msg(format!("Properties not found in cache, fetching {}", url,)).await;
+        info!("Properties not found in cache, fetching {}", url,);
 
         info!(%url);
 

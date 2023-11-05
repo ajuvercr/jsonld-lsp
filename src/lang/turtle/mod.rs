@@ -356,6 +356,7 @@ impl TurtleLang {
             edits,
         }
     }
+
     fn get_undefined_prefixes<O, F: Fn(UndefinedPrefix) -> O>(
         &self,
         state: &CurrentLangState<Self>,
@@ -383,14 +384,6 @@ impl TurtleLang {
                 }
                 _ => None,
             })
-            // .filter(|x| {
-            //     if !seen.contains(&x.prefix) {
-            //         seen.insert(x.prefix.clone());
-            //         return true;
-            //     } else {
-            //         false
-            //     }
-            // })
             .map(f)
             .collect()
     }
@@ -439,12 +432,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
             let base = turtle.get_base(&self.id);
             info!("Updating prefixes for {} and {}", base, self.id);
             prefixes
-                .update(
-                    base.as_str(),
-                    turtle,
-                    Some(&format!("{}#", self.id)),
-                    |_| {},
-                )
+                .update(base.as_str(), turtle, Some(&self.id), |_| {})
                 .await;
         }
 
@@ -533,6 +521,8 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                 } else {
                     self.prefixes.get(prefix_str).map(String::from)
                 };
+
+                info!("m_expaned {:?}", m_expanended);
 
                 let mut out = Vec::new();
                 if let Some(expaned) = m_expanended {
