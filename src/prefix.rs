@@ -31,6 +31,7 @@ pub struct Property {
     pub comment: Option<String>,
     pub ty: PropertyType,
 }
+
 impl Into<CompletionItemKind> for PropertyType {
     fn into(self) -> CompletionItemKind {
         match self {
@@ -223,15 +224,8 @@ impl Prefixes {
     }
 
     fn default_prefix() -> HashMap<String, String> {
-        let mut out = HashMap::new();
-        for (k, v) in [
-            ("xsd", "http://www.w3.org/2001/XMLSchema#"),
-            ("rdfs", "http://www.w3.org/2000/01/rdf-schema#"),
-            ("rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#"),
-        ] {
-            out.insert(k.to_string(), v.to_string());
-        }
-
+        let prefix_cc_str = include_str!("../prefix_cc.json");
+        let out = serde_json::from_str(&prefix_cc_str).unwrap();
         out
     }
 
