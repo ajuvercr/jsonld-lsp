@@ -328,9 +328,11 @@ impl TurtleLang {
         &self,
         prop: &Property,
         prefix: &str,
+        prefix_url: &str,
         range: lsp_types::Range,
     ) -> SimpleCompletion {
-        let new_text = format!("{}:{}", prefix, prop.short);
+        let short = prop.short(prefix_url);
+        let new_text = format!("{}:{}", prefix, short);
         let edits = vec![lsp_types::TextEdit {
             new_text,
             range: range.clone(),
@@ -341,8 +343,8 @@ impl TurtleLang {
                 format!("{}: {}", label, comment)
             }
             (None, Some(label)) => label.clone(),
-            (Some(comment), None) => format!("{}: {}", prop.short, comment),
-            (None, None) => prop.short.clone(),
+            (Some(comment), None) => format!("{}: {}", short, comment),
+            (None, None) => short.clone(),
         };
 
         let documentation = Some(prop.id.clone());
@@ -351,8 +353,8 @@ impl TurtleLang {
             kind: prop.ty.into(),
             label,
             documentation,
-            sort_text: Some(format!("{}:{}", prefix, prop.short)),
-            filter_text: Some(format!("{}:{}", prefix, prop.short)),
+            sort_text: Some(format!("{}:{}", prefix, short)),
+            filter_text: Some(format!("{}:{}", prefix, short)),
             edits,
         }
     }
@@ -432,7 +434,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
             let base = turtle.get_base(&self.id);
             info!("Updating prefixes for {} and {}", base, self.id);
             prefixes
-                .update(base.as_str(), turtle, Some(&self.id), |_| {})
+                .update(&self.id, turtle, Some(&format!("{}#", base)), |_| {})
                 .await;
         }
 
@@ -537,7 +539,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                                 info!("Properties {}", props.len());
 
                                 out.extend(props.iter().map(|prop| {
-                                    self.property_to_completion(prop, prefix_str, range)
+                                    self.property_to_completion(prop, prefix_str, &expaned, range)
                                 }));
                             },
                             |msg| client.log_message(MessageType::INFO, msg),

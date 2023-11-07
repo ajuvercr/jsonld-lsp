@@ -11,7 +11,7 @@ use crate::{
 };
 use chumsky::{primitive::end, recovery::skip_then_retry_until, Parser};
 use futures::lock::Mutex;
-use lsp_types::{lsp_request, CompletionItemKind};
+use lsp_types::CompletionItemKind;
 use tracing::info;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -26,10 +26,30 @@ pub enum PropertyType {
 #[derive(Debug, Clone, Default)]
 pub struct Property {
     pub id: String,
-    pub short: String,
+    short: String,
     pub label: Option<String>,
     pub comment: Option<String>,
     pub ty: PropertyType,
+}
+
+impl Property {
+    pub fn short(&self, prefix: &str) -> String {
+        let id = &self.id;
+        if let Some(short) = id.strip_prefix(prefix) {
+            short.to_string()
+        } else {
+            info!("did not strip prefix  {} {}", id, prefix);
+            match (
+                lsp_types::Url::parse(&self.id),
+                lsp_types::Url::parse(prefix),
+            ) {
+                (Ok(id_url), Ok(prefix_url)) => prefix_url
+                    .make_relative(&id_url)
+                    .unwrap_or_else(|| id[prefix.len()..].to_string()),
+                _ => id[prefix.len()..].to_string(),
+            }
+        }
+    }
 }
 
 impl Into<CompletionItemKind> for PropertyType {
@@ -172,8 +192,10 @@ fn extract_properties(turtle: &Turtle, prefix: &str, base: &str) -> Vec<Property
         found.insert(id.clone());
 
         let short = if let Some(short) = id.strip_prefix(prefix) {
+            info!("striped prefix {} {} {}", id, prefix, short);
             short.to_string()
         } else {
+            info!("did not strip prefix  {} {}", id, prefix);
             match (lsp_types::Url::parse(&id), &prefix_url) {
                 (Ok(id_url), Ok(prefix_url)) => prefix_url
                     .make_relative(&id_url)
