@@ -4,6 +4,7 @@
 	"displayName": "turtle lsp",
 	"description": "A language server and language definition for turtle",
 	"author": "Arthur Vercruysse",
+  "icon": "icon.png",
 	"license": "MIT",
 	"version": "0.0.2",
 	"repository": "https://github.com/ajuvercr/jsonld-lsp/",

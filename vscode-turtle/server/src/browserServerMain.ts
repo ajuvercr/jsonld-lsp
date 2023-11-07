@@ -9,6 +9,7 @@ import {
 } from "vscode-languageserver/browser";
 
 import {
+    CodeActionParams,
   DidOpenTextDocumentParams,
   InitializeParams,
   PrepareRenameParams,
@@ -118,6 +119,10 @@ connection.onDocumentFormatting(async (change) => {
   connection.console.log("Doc formatting");
   return await server?.formatting(change);
 });
+
+connection.onCodeAction(async (change: CodeActionParams) => {
+  return await server?.code_action(change);
+})
 
 connection.onDidChangeTextDocument(async (change) => {
   connection.console.log("Doc change");

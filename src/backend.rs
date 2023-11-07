@@ -118,10 +118,15 @@ where
         let mut langs = self.langs.lock().await;
 
         if let Some((ref mut lang, ref mut state)) = langs.get_mut(uri.as_str()) {
-            let start = position_to_offset(range.start, &rope)
-                .ok_or(Error::new(ErrorCode::InvalidRequest))?;
-            let end = position_to_offset(range.end, &rope)
-                .ok_or(Error::new(ErrorCode::InvalidRequest))?;
+            let start = match position_to_offset(range.start, &rope) {
+                Some(start) => start,
+                _ => return Ok(None),
+            };
+            let end = match position_to_offset(range.end, &rope) {
+                Some(end) => end,
+                _ => return Ok(None),
+            };
+
             if let Some(t) = lang.code_action(state, start..end, &uri) {
                 return Ok(Some(t));
             }

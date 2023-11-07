@@ -251,6 +251,6 @@ impl JsonLDWebBackend {
     }
 }
 
-gen!(TurtleWebBackend, JsonLDWebBackend ; initialize wt::InitializeParams prepare_rename wt::PrepareRenameParams  rename wt::RenameParams semantic_tokens_full wt::SemanticTokensParams completion wt::CompletionParams formatting wt::DocumentFormattingParams );
+gen!(TurtleWebBackend, JsonLDWebBackend ; initialize wt::InitializeParams prepare_rename wt::PrepareRenameParams  rename wt::RenameParams semantic_tokens_full wt::SemanticTokensParams completion wt::CompletionParams formatting wt::DocumentFormattingParams code_action wt::CodeActionParams );
 
 gen2!(TurtleWebBackend, JsonLDWebBackend; did_open  wt::DidOpenTextDocumentParams did_change wt::DidChangeTextDocumentParams did_save wt::DidSaveTextDocumentParams);

@@ -3,7 +3,7 @@ use wasm_bindgen::prelude::wasm_bindgen;
 #[wasm_bindgen(typescript_custom_section)]
 const ITEXT_STYLE: &'static str = r#"
 
-import { DidChangeTextDocumentParams, DidSaveTextDocumentParams, DidOpenTextDocumentParams, TextDocumentPositionParams, InitializeParams, PrepareRenameParams, RenameParams, SemanticTokensParams, Diagnostic, CompletionParams, DocumentFormattingParams } from "vscode-languageserver";
+import { DidChangeTextDocumentParams, DidSaveTextDocumentParams, DidOpenTextDocumentParams, TextDocumentPositionParams, InitializeParams, PrepareRenameParams, RenameParams, SemanticTokensParams, Diagnostic, CompletionParams, CodeActionParams, DocumentFormattingParams } from "vscode-languageserver";
 
 
 type Diagnostics = { diagnostics: Diagnostic[]; uri: string };
@@ -14,6 +14,9 @@ type SetReadFileFn = (url: string) => Promise<string>;
 
 #[wasm_bindgen]
 extern "C" {
+    #[wasm_bindgen(typescript_type = "CodeActionParams")]
+    pub type CodeActionParams;
+
     #[wasm_bindgen(typescript_type = "InitializeParams")]
     pub type InitializeParams;
 
