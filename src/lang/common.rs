@@ -204,6 +204,7 @@ pub trait Lang: Sized {
     type Node: Node<Self::NodeLeaf> + Send + Sync;
     type NodeLeaf: Send + Sync + Token;
 
+    const CODE_ACTION: bool;
     const LANG: &'static str;
     const TRIGGERS: &'static [&'static str];
     const LEGEND_TYPES: &'static [SemanticTokenType];

@@ -231,7 +231,10 @@ impl<I: Clone + Eq + Hash + Sync + Send + AsRef<str>, T: Clone + Send, M: Send, 
                 let mut headers = HashMap::new();
                 headers.insert("accept".to_string(), data.accept_header.to_string());
 
-                let resp = fetch(url.as_ref(), &headers).await.unwrap();
+                let resp = match fetch(url.as_ref(), &headers).await {
+                    Ok(resp) => resp,
+                    Err(_x) => return Err(Error::TooManyRedirections),
+                };
 
                 let status = StatusCode::from_u16(resp.status).unwrap();
 

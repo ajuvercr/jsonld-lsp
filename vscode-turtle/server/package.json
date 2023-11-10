@@ -1,7 +1,7 @@
 {
 	"name": "lsp-web-extension-sample-server",
 	"description": "Example implementation of a language server in a web extension.",
-	"version": "1.1.0",
+	"version": "1.0.0",
 	"author": "Microsoft Corporation",
 	"license": "MIT",
 	"engines": {

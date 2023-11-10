@@ -122,6 +122,7 @@ impl Lang for JsonLd {
     type NodeLeaf = JsonToken;
 
     const LANG: &'static str = "jsonld";
+    const CODE_ACTION: bool = false;
 
     const TRIGGERS: &'static [&'static str] = &["@", "\""];
     const LEGEND_TYPES: &'static [SemanticTokenType] = &[

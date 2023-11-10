@@ -3,11 +3,15 @@
 	"publisher": "ajuvercr",
 	"displayName": "jsonld lsp",
 	"description": "A language server and language definition for JSON-LD",
-	"author": "Microsoft Corporation",
+	"author": "Arthur Vercruysse",
+  "icon": "icon.png",
 	"license": "MIT",
-	"version": "0.0.7",
+	"version": "0.0.9",
 	"repository": "https://github.com/ajuvercr/jsonld-lsp/",
 	"categories": [
+		"Programming Languages",
+		"Languages",
+		"Formatters",
 		"Other"
 	],
 	"engines": {
@@ -17,6 +21,11 @@
 		"onLanguage:jsonld"
 	],
 	"browser": "./client/dist/browserClientMain",
+	"configurationDefaults": {
+		"[turtle]": {
+			"editor.semanticHighlighting.enabled": true
+		}
+	},
 	"contributes": {
 		"languages": [
 			{

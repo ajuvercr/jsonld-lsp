@@ -74,6 +74,7 @@ impl Lang for TurtleLang {
     const LANG: &'static str = "turtle";
 
     const TRIGGERS: &'static [&'static str] = &[":"];
+    const CODE_ACTION: bool = true;
 
     const LEGEND_TYPES: &'static [lsp_types::SemanticTokenType] = &[
         semantic_token::BOOLEAN,

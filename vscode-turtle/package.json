@@ -6,7 +6,7 @@
 	"author": "Arthur Vercruysse",
   "icon": "icon.png",
 	"license": "MIT",
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"repository": "https://github.com/ajuvercr/jsonld-lsp/",
 	"categories": [
 		"Programming Languages",
