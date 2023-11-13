@@ -1,12 +1,14 @@
 use std::{
     collections::{HashMap, HashSet},
+    ops::Deref,
     pin::Pin,
     sync::Arc,
 };
 
 use crate::{
-    lang::turtle::{self, BlankNode, NamedNode, Turtle},
+    lang::turtle::{self, NamedNode, Turtle},
     model::spanned,
+    triple::{extract_triples, Triple},
     utils::fetch,
 };
 use chumsky::{primitive::end, recovery::skip_then_retry_until, Parser};
@@ -26,7 +28,6 @@ pub enum PropertyType {
 #[derive(Debug, Clone, Default)]
 pub struct Property {
     pub id: String,
-    short: String,
     pub label: Option<String>,
     pub comment: Option<String>,
     pub ty: PropertyType,
@@ -64,12 +65,70 @@ impl Into<CompletionItemKind> for PropertyType {
 }
 
 #[derive(Clone, Debug)]
-pub struct Prefixes {
-    names: Arc<HashMap<String, String>>,
-    properties: Arc<Mutex<HashMap<String, Result<Vec<Property>, String>>>>,
+enum Source {
+    Http(lsp_types::Url),
+    File(lsp_types::Url),
 }
 
-fn parse(str: &str, location: &str) -> Result<Turtle, String> {
+impl Source {
+    pub fn from_str(uri: &str) -> Option<Self> {
+        let mut uri = lsp_types::Url::parse(uri).ok()?;
+        uri.set_query(None);
+        uri.set_fragment(None);
+
+        match uri.scheme() {
+            "file" => Some(Source::File(uri)),
+            "http" | "https" => Some(Source::Http(uri)),
+            _ => None,
+        }
+    }
+    pub fn from_url(uri: &lsp_types::Url) -> Option<Self> {
+        let mut url = uri.clone();
+        url.set_query(None);
+        url.set_fragment(None);
+        match url.scheme() {
+            "file" => Some(Source::File(url)),
+            "http" | "https" => Some(Source::Http(url)),
+            _ => None,
+        }
+    }
+}
+
+impl Deref for Source {
+    type Target = lsp_types::Url;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Source::Http(x) => x,
+            Source::File(x) => x,
+        }
+    }
+}
+
+struct FoundProperty {
+    property: Property,
+    source: Source,
+    deleted: bool,
+}
+
+impl FoundProperty {
+    fn new(property: Property, source: Source) -> Self {
+        Self {
+            property,
+            source,
+            deleted: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Prefixes {
+    names: Arc<HashMap<String, String>>,
+    sources: Arc<Mutex<Vec<Source>>>,
+    found_properties: Arc<Mutex<Vec<FoundProperty>>>,
+}
+
+fn parse(str: &str, location: &lsp_types::Url) -> Result<Turtle, String> {
     let parser = turtle::tokenizer::parse_tokens();
 
     let tokens = parser
@@ -82,7 +141,8 @@ fn parse(str: &str, location: &str) -> Result<Turtle, String> {
         tokens.into_iter().filter(|x| !x.0.is_comment()),
     );
 
-    let parser = turtle::turtle().then_ignore(end().recover_with(skip_then_retry_until([])));
+    let parser =
+        turtle::turtle(&location).then_ignore(end().recover_with(skip_then_retry_until([])));
 
     let (turtle, errors) = parser.parse_recovery(stream);
     info!(?errors);
@@ -90,18 +150,12 @@ fn parse(str: &str, location: &str) -> Result<Turtle, String> {
     let mut turtle = turtle.ok_or(String::from("Not valid turtle"))?;
 
     if turtle.base.is_none() {
-        let nn = NamedNode::Full(location.into());
+        let nn = NamedNode::Full(location.to_string());
         // iew
         turtle.base = Some(spanned(turtle::Base(0..1, spanned(nn, 0..1)), 0..1));
     }
 
     Ok(turtle)
-}
-
-struct Triple {
-    subject: String,
-    predicate: String,
-    object: String,
 }
 
 const TYPE: &'static str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
@@ -127,56 +181,13 @@ const PROPERTIES: &'static [(&'static str, PropertyType)] = &[
 ];
 
 #[tracing::instrument(skip(turtle))]
-fn extract_properties(turtle: &Turtle, prefix: &str, base: &str) -> Vec<Property> {
+fn extract_properties(turtle: &Turtle) -> Vec<Property> {
     info!( triples = turtle.triples.len(), ?turtle.base);
-    let mut triples: Vec<Triple> = Vec::new();
+    let triples: Vec<Triple> = extract_triples(turtle);
 
-    let mut found = HashSet::new();
-
-    for triple in &turtle.triples {
-        let subject = match &triple.subject.0 {
-            turtle::Subject::BlankNode(BlankNode::Named(x)) => x.clone(),
-            turtle::Subject::NamedNode(n) => {
-                if let Some(x) = n.expand(&turtle, base) {
-                    info!("subject {:?} -> {}", n, x);
-                    x
-                } else {
-                    continue;
-                }
-            }
-            _ => continue,
-        };
-
-        for po in &triple.po {
-            if let Some(pred) = po.predicate.expand(&turtle, base) {
-                for ob in &po.object {
-                    let object = match &ob.0 {
-                        turtle::Term::Literal(s) => s.plain_string(),
-                        turtle::Term::BlankNode(BlankNode::Named(x)) => x.clone(),
-                        turtle::Term::NamedNode(n) => {
-                            if let Some(o) = n.expand(&turtle, base) {
-                                o
-                            } else {
-                                continue;
-                            }
-                        }
-                        _ => continue,
-                    };
-                    triples.push(Triple {
-                        subject: subject.clone(),
-                        predicate: pred.clone(),
-                        object,
-                    });
-                }
-            } else {
-                continue;
-            }
-        }
-    }
-
-    let prefix_url = lsp_types::Url::parse(prefix);
     info!(?turtle.base, triples = triples.len());
 
+    let mut found = HashSet::new();
     let mut properties = Vec::new();
     for subj in triples.iter().filter(|x| x.predicate == TYPE) {
         let ty = if let Some(ty) = PROPERTIES.iter().find(|x| x.0 == subj.object.as_str()) {
@@ -190,21 +201,6 @@ fn extract_properties(turtle: &Turtle, prefix: &str, base: &str) -> Vec<Property
             continue;
         }
         found.insert(id.clone());
-
-        let short = if let Some(short) = id.strip_prefix(prefix) {
-            info!("striped prefix {} {} {}", id, prefix, short);
-            short.to_string()
-        } else {
-            info!("did not strip prefix  {} {}", id, prefix);
-            match (lsp_types::Url::parse(&id), &prefix_url) {
-                (Ok(id_url), Ok(prefix_url)) => prefix_url
-                    .make_relative(&id_url)
-                    .unwrap_or_else(|| id[prefix.len()..].to_string()),
-                _ => id[prefix.len()..].to_string(),
-            }
-        };
-
-        info!("Crash result {}", short);
 
         let label = triples
             .iter()
@@ -223,7 +219,6 @@ fn extract_properties(turtle: &Turtle, prefix: &str, base: &str) -> Vec<Property
 
         properties.push(Property {
             id,
-            short,
             label,
             comment,
             ty,
@@ -260,7 +255,8 @@ impl Prefixes {
 
         Some(Prefixes {
             names: names.into(),
-            properties: Default::default(),
+            sources: Default::default(),
+            found_properties: Default::default(),
         })
     }
 
@@ -272,105 +268,75 @@ impl Prefixes {
         self.names.keys().map(|x| x.as_str())
     }
 
-    pub async fn update<'a>(
-        &'a self,
-        url: &str,
-        turtle: &Turtle,
-        alias: Option<&str>,
-        f: impl FnOnce(&[Property]),
-    ) {
-        let properties = extract_properties(turtle, url, url);
-        f(&properties);
+    pub async fn update<'a>(&'a self, url: &lsp_types::Url, turtle: &Turtle) -> Option<()> {
+        let source = Source::from_url(url)?;
+        let props = extract_properties(turtle);
 
-        let mut props = self.properties.lock().await;
-        if let Some(alias) = alias {
-            props.insert(alias.to_string(), Ok(properties.clone()));
-        }
+        let mut prop_iter = props
+            .into_iter()
+            .map(|x| FoundProperty::new(x, source.clone()));
 
-        props.insert(url.to_string(), Ok(properties));
-    }
+        let mut found = self.found_properties.lock().await;
 
-    pub async fn fetch<'a>(
-        &'a self,
-        url: &str,
-        f: impl FnOnce(&[Property]),
-        msg: impl Fn(String) -> Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>,
-    ) -> Result<(), String> {
-        {
-            let props = self.properties.lock().await;
-            if let Some(out) = props.get(url) {
-                info!(
-                    "Found properties for {} in cache (found = {})",
-                    url,
-                    out.is_ok()
-                );
-                f(out.as_ref()?);
-                return Ok(());
-            }
-        }
-
-        if let Ok(mut url_parsed) = lsp_types::Url::parse(url) {
-            url_parsed.set_fragment(None);
-            url_parsed.set_query(None);
-            {
-                let url_str = url_parsed.to_string();
-                let props = self.properties.lock().await;
-                if let Some(out) = props.get(&url_str) {
-                    info!(
-                        "Found properties for {} in cache (found = {})",
-                        url,
-                        out.is_ok()
-                    );
-                    f(out.as_ref()?);
-                    return Ok(());
+        for existing_prop in found.iter_mut() {
+            if source.deref() == url {
+                if let Some(p) = prop_iter.next() {
+                    *existing_prop = p;
+                } else {
+                    existing_prop.deleted = true;
                 }
             }
         }
 
-        msg(format!("Properties not found in cache, fetching {}", url,)).await;
+        found.extend(prop_iter);
+
+        Some(())
+    }
+
+    pub async fn fetch<'a>(
+        &'a self,
+        url_str: &str,
+        msg: impl Fn(String) -> Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>,
+        mut f: impl FnMut(&Property),
+    ) -> Result<(), String> {
+        let mut url = lsp_types::Url::parse(url_str).map_err(|x| format!("invalid uri {}", x))?;
+        url.set_fragment(None);
+        url.set_query(None);
+
+        let mut sources = self.sources.lock().await;
+        let fetched = sources.iter().find(|x| url.eq(&x)).is_some();
+        if fetched {
+            drop(sources);
+            info!("Found properties for {} in cache", url,);
+            let props = self.found_properties.lock().await;
+            props
+                .iter()
+                .filter(|prop| prop.property.id.starts_with(url_str))
+                .for_each(|x| f(&x.property));
+
+            return Ok(());
+        }
+
+        sources.push(Source::from_url(&url).ok_or("Incorrect scheme".to_string())?);
+        drop(sources);
+
         info!("Properties not found in cache, fetching {}", url,);
 
-        info!(%url);
-
         let headers = [("Accept".to_string(), "text/turtle".to_string())].into();
-        let resp = match fetch(&url, &headers).await {
-            Ok(resp) => {
-                info!(?resp.status, len = resp.body.len());
-                msg(format!(
-                    "Fetch successful {} ({} bytes)",
-                    url,
-                    resp.body.len()
-                ))
-                .await;
-                resp
-            }
-            Err(e) => {
-                let mut props = self.properties.lock().await;
-                props.insert(url.to_string(), Err(e.clone()));
-
-                msg(format!("Failed to fetch {}", url,)).await;
-                return Err(e);
-            }
-        };
+        let resp = fetch(&url_str, &headers).await?;
+        info!(?resp.status, len = resp.body.len());
+        msg(format!(
+            "Fetch successful {} ({} bytes)",
+            url,
+            resp.body.len()
+        ))
+        .await;
 
         // Parse the turtle
-        let out = match parse(&resp.body, &url) {
-            Ok(turtle) => {
-                msg(format!("Parse successful {}", url,)).await;
-                let base = turtle.get_base(url);
-                let alias = (base.to_string() != url).then_some(base);
-                self.update(url, &turtle, alias.as_ref().map(|x| x.as_str()), f)
-                    .await;
-                Ok(())
-            }
-            Err(s) => {
-                msg(format!("Failed to parse {}", url,)).await;
-                let mut props = self.properties.lock().await;
-                props.insert(url.to_string(), Err(s.clone()));
-                Err(s)
-            }
-        };
+        let turtle = parse(&resp.body, &url)?;
+        msg(format!("Parse successful {}", url,)).await;
+        let _ = self.update(&url, &turtle).await;
 
-        out
+        Ok(())
     }
 }

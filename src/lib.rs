@@ -4,6 +4,7 @@ pub mod backend;
 pub mod contexts;
 pub mod lang;
 pub mod model;
+pub mod triple;
 pub mod parent;
 pub mod prefix;
 pub mod semantics;

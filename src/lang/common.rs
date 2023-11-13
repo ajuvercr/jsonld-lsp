@@ -151,6 +151,16 @@ pub struct CurrentLangStatePart<E> {
     pub last_valid: Arc<E>,
     pub current: Arc<E>,
 }
+
+impl<E> CurrentLangStatePart<E> {
+    pub fn new(this: E) -> Self {
+        let this = Arc::new(this);
+        Self {
+            current: this.clone(),
+            last_valid: this,
+        }
+    }
+}
 impl<E: Default> Default for CurrentLangStatePart<E> {
     fn default() -> Self {
         let current: Arc<E> = Default::default();

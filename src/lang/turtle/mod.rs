@@ -35,7 +35,8 @@ use self::{
 };
 
 use super::{
-    CurrentLangState, DiagnosticSender, Lang, LangState, SimpleCompletion, SimpleDiagnostic,
+    CurrentLangState, CurrentLangStatePart, DiagnosticSender, Lang, LangState, SimpleCompletion,
+    SimpleDiagnostic,
 };
 
 pub mod semantic_token {
@@ -46,7 +47,7 @@ pub mod semantic_token {
 
 #[allow(unused)]
 pub struct TurtleLang {
-    id: String,
+    id: lsp_types::Url,
     rope: Rope,
     comments: Vec<Spanned<String>>,
     defined_prefixes: HashSet<String>,
@@ -109,7 +110,7 @@ impl Lang for TurtleLang {
                 .map(|Spanned(x, s)| (x.clone(), s.clone())),
         );
 
-        let parser = turtle()
+        let parser = turtle(&self.id)
             .map_with_span(spanned)
             .then_ignore(end().recover_with(skip_then_retry_until([])));
 
@@ -155,18 +156,14 @@ impl Lang for TurtleLang {
                 .map(|Spanned(x, s)| (x, s)),
         );
 
-        let parser = turtle()
+        let parser = turtle(&self.id)
             .map_with_span(spanned)
             .then_ignore(end().recover_with(skip_then_retry_until([])));
 
-        let (mut json, json_errors) = parser.parse_recovery(stream);
-        if let Some(ref mut ttl) = &mut json {
-            info!("triples {}", ttl.triples.len());
-            ttl.0.set_base(&self.id);
-        }
+        let (json, json_errors) = parser.parse_recovery(stream);
 
         (
-            json.unwrap_or(Spanned(Default::default(), 0..source.len())),
+            json.unwrap_or(Spanned(Turtle::empty(&self.id), 0..source.len())),
             json_errors,
         )
     }
@@ -270,15 +267,20 @@ impl Lang for TurtleLang {
     }
 
     fn new(id: String, state: Self::State) -> (Self, CurrentLangState<Self>) {
+        let url = lsp_types::Url::parse(&id).unwrap();
         (
             TurtleLang {
-                id: format!("{}", id),
+                id: url.clone(),
                 rope: Rope::new(),
                 comments: Vec::new(),
                 defined_prefixes: HashSet::new(),
                 prefixes: state.clone(),
             },
-            Default::default(),
+            CurrentLangState {
+                element: CurrentLangStatePart::new(spanned(Turtle::empty(&url), 0..1)),
+                tokens: CurrentLangStatePart::new(Default::default()),
+                parents: CurrentLangStatePart::new(Default::default()),
+            },
         )
     }
 }
@@ -426,17 +428,14 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
             .flat_map(|Spanned(ref prefix, ref span)| {
                 prefix
                     .value
-                    .expand(turtle, &self.id)
+                    .expand(turtle)
                     .map(|pref| Spanned(pref, span.clone()))
             })
             .collect();
 
         if state.element.last_is_valid() {
-            let base = turtle.get_base(&self.id);
-            info!("Updating prefixes for {} and {}", base, self.id);
-            prefixes
-                .update(&self.id, turtle, Some(&format!("{}#", base)), |_| {})
-                .await;
+            info!("Updating prefixes for {}", self.id);
+            prefixes.update(&self.id, turtle).await;
         }
 
         async move {
@@ -448,7 +447,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                 .into_iter()
                 .map(|prefix| async move {
                     if let Err(e) = prefixes
-                        .fetch(&prefix, |_| {}, |_msg| async {}.boxed())
+                        .fetch(&prefix, |_msg| async {}.boxed(), |_| {})
                         .await
                     {
                         info!("sending diagnostic, {} ", prefix.value());
@@ -520,7 +519,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                     .iter()
                     .find(|x| x.prefix.as_str() == prefix_str)
                 {
-                    prefix.value.expand(turtle, &self.id)
+                    prefix.value.expand(turtle)
                 } else {
                     self.prefixes.get(prefix_str).map(String::from)
                 };
@@ -536,14 +535,12 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                         .prefixes
                         .fetch(
                             &expaned,
-                            |props| {
-                                info!("Properties {}", props.len());
-
-                                out.extend(props.iter().map(|prop| {
-                                    self.property_to_completion(prop, prefix_str, &expaned, range)
-                                }));
-                            },
                             |msg| client.log_message(MessageType::INFO, msg),
+                            |prop| {
+                                out.push(
+                                    self.property_to_completion(prop, prefix_str, &expaned, range),
+                                )
+                            },
                         )
                         .await;
 

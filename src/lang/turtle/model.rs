@@ -69,8 +69,8 @@ pub enum NamedNode {
     Invalid,
 }
 impl NamedNode {
-    pub fn expand(&self, turtle: &Turtle, base: &str) -> Option<String> {
-        let base = turtle.get_base(base);
+    pub fn expand(&self, turtle: &Turtle) -> Option<String> {
+        let base = turtle.get_base();
         let out = self.expand_step(turtle, HashSet::new())?;
 
         let url = base.join(&out).ok()?;
@@ -243,12 +243,18 @@ impl Display for Prefix {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Turtle {
     pub base: Option<Spanned<Base>>,
-    set_base: Option<lsp_types::Url>,
+    pub set_base: lsp_types::Url,
     pub prefixes: Vec<Spanned<Prefix>>,
     pub triples: Vec<Spanned<Triple>>,
+}
+
+impl Turtle {
+    pub fn empty(location: &lsp_types::Url) -> Self {
+        Self::new(None, Vec::new(), Vec::new(), location)
+    }
 }
 
 impl Turtle {
@@ -256,37 +262,18 @@ impl Turtle {
         base: Option<Spanned<Base>>,
         prefixes: Vec<Spanned<Prefix>>,
         triples: Vec<Spanned<Triple>>,
+        location: &lsp_types::Url,
     ) -> Self {
         Self {
             base,
             prefixes,
             triples,
-            set_base: None,
+            set_base: location.clone(),
         }
     }
-    pub fn set_base(&mut self, location: &str) {
-        let location_url = lsp_types::Url::parse(location).unwrap();
 
-        let base = self
-            .base
-            .as_ref()
-            .and_then(|base| match base.0 .1.value() {
-                NamedNode::Full(s) => Some(
-                    location_url
-                        .join(s.as_str())
-                        .map(|x| x.to_string())
-                        .unwrap_or(s.to_string()),
-                ),
-                _ => None,
-            })
-            .unwrap_or(location.to_string());
-
-        self.set_base = lsp_types::Url::parse(&base).ok();
-    }
-    pub fn get_base(&self, location: &str) -> lsp_types::Url {
-        self.set_base
-            .clone()
-            .unwrap_or_else(|| lsp_types::Url::parse(location).unwrap())
+    pub fn get_base(&self) -> &lsp_types::Url {
+        &self.set_base
     }
 }
 

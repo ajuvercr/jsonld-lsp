@@ -151,7 +151,9 @@ enum Statement {
     Triple(Spanned<Triple>),
 }
 
-pub fn turtle() -> impl Parser<Token, Turtle, Error = Simple<Token>> {
+pub fn turtle<'a>(
+    location: &'a lsp_types::Url,
+) -> impl Parser<Token, Turtle, Error = Simple<Token>> + 'a {
     let base = base().map_with_span(spanned).map(|b| Statement::Base(b));
     let prefix = prefix()
         .map_with_span(spanned)
@@ -173,7 +175,7 @@ pub fn turtle() -> impl Parser<Token, Turtle, Error = Simple<Token>> {
             }
         }
 
-        Turtle::new(base, prefixes, triples)
+        Turtle::new(base, prefixes, triples, location)
     })
 }
 
@@ -318,7 +320,7 @@ pub mod turtle_tests {
 <a> <b> <c>.
 #This is a very nice comment!
             "#;
-        let output = parse_it(txt, turtle()).expect("simple");
+        let output = parse_it(txt, turtle("http://example.com/ns#")).expect("simple");
         assert_eq!(output.prefixes.len(), 1, "prefixes are parsed");
         assert_eq!(output.triples.len(), 1, "triples are parsed");
         assert!(output.base.is_some(), "base is parsed");
