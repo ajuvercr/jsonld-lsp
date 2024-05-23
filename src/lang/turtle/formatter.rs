@@ -444,6 +444,8 @@ pub fn format_turtle(
 #[cfg(test)]
 mod tests {
 
+    use std::str::FromStr;
+
     use chumsky::{Parser, Stream};
     use ropey::Rope;
 
@@ -458,7 +460,10 @@ mod tests {
         Parsing,
     }
 
-    fn parse_turtle(inp: &str) -> Result<(Turtle, Vec<Spanned<String>>), Err> {
+    fn parse_turtle(
+        inp: &str,
+        url: &lsp_types::Url,
+    ) -> Result<(Turtle, Vec<Spanned<String>>), Err> {
         let tokens = tokenizer::parse_tokens().parse(inp).map_err(|err| {
             println!("Token error {:?}", err);
             Err::Tokenizing
@@ -475,7 +480,7 @@ mod tests {
 
         let stream = Stream::from_iter(end, tokens.into_iter().filter(|x| !x.0.is_comment()));
 
-        turtle()
+        turtle(&url)
             .parse(stream)
             .map_err(|err| {
                 println!("Parse error {:?}", err);
@@ -503,7 +508,9 @@ mod tests {
   foaf:knows <abc>.
 
 "#;
-        let (output, comments) = parse_turtle(txt).expect("Simple");
+
+        let url = lsp_types::Url::from_str("http://example.com/ns#").unwrap();
+        let (output, comments) = parse_turtle(txt, &url).expect("Simple");
         let formatted = format_turtle(
             &output,
             lsp_types::FormattingOptions {
@@ -530,7 +537,9 @@ mod tests {
   foaf:knows2 <abc>.
 
 "#;
-        let (output, comments) = parse_turtle(txt).expect("Simple");
+
+        let url = lsp_types::Url::from_str("http://example.com/ns#").unwrap();
+        let (output, comments) = parse_turtle(txt, &url).expect("Simple");
         let formatted = format_turtle(
             &output,
             lsp_types::FormattingOptions {
@@ -565,7 +574,9 @@ mod tests {
 ].
 
 "#;
-        let (output, comments) = parse_turtle(txt).expect("Simple");
+
+        let url = lsp_types::Url::from_str("http://example.com/ns#").unwrap();
+        let (output, comments) = parse_turtle(txt, &url).expect("Simple");
         let formatted = format_turtle(
             &output,
             lsp_types::FormattingOptions {
@@ -592,7 +603,9 @@ mod tests {
   <soemthing eeeellssee>.
 
 "#;
-        let (output, comments) = parse_turtle(txt).expect("Simple");
+
+        let url = lsp_types::Url::from_str("http://example.com/ns#").unwrap();
+        let (output, comments) = parse_turtle(txt, &url).expect("Simple");
         let formatted = format_turtle(
             &output,
             lsp_types::FormattingOptions {
@@ -615,7 +628,9 @@ mod tests {
         let expected = r#"<abc> a ( ), ( <abc> <def> ).
 
 "#;
-        let (output, comments) = parse_turtle(txt).expect("Simple");
+
+        let url = lsp_types::Url::from_str("http://example.com/ns#").unwrap();
+        let (output, comments) = parse_turtle(txt, &url).expect("Simple");
         let formatted = format_turtle(
             &output,
             lsp_types::FormattingOptions {
@@ -643,7 +658,9 @@ mod tests {
 ).
 
 "#;
-        let (output, comments) = parse_turtle(txt).expect("Simple");
+
+        let url = lsp_types::Url::from_str("http://example.com/ns#").unwrap();
+        let (output, comments) = parse_turtle(txt, &url).expect("Simple");
         let formatted = format_turtle(
             &output,
             lsp_types::FormattingOptions {
@@ -675,7 +692,9 @@ mod tests {
   foaf:knows2 <abc>.
 
 "#;
-        let (output, comments) = parse_turtle(txt).expect("Simple");
+
+        let url = lsp_types::Url::from_str("http://example.com/ns#").unwrap();
+        let (output, comments) = parse_turtle(txt, &url).expect("Simple");
         let formatted = format_turtle(
             &output,
             lsp_types::FormattingOptions {
@@ -708,7 +727,8 @@ mod tests {
 
 #trailing comments
 "#;
-        let (output, comments) = parse_turtle(txt).expect("Simple");
+        let url = lsp_types::Url::from_str("http://example.com/ns#").unwrap();
+        let (output, comments) = parse_turtle(txt, &url).expect("Simple");
         let formatted = format_turtle(
             &output,
             lsp_types::FormattingOptions {
@@ -753,7 +773,8 @@ mod tests {
 
 "#;
 
-        let (output, comments) = parse_turtle(txt).expect("Simple");
+        let url = lsp_types::Url::from_str("http://example.com/ns#").unwrap();
+        let (output, comments) = parse_turtle(txt, &url).expect("Simple");
         let formatted = format_turtle(
             &output,
             lsp_types::FormattingOptions {

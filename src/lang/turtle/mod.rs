@@ -1,13 +1,15 @@
+mod completion;
 mod formatter;
 mod model;
 mod node;
 mod parser;
+pub mod shacl;
 mod token;
 pub mod tokenizer;
-use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
+use futures::FutureExt;
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionResponse, CompletionItemKind,
-    DiagnosticSeverity, FormattingOptions, MessageType, Position, SemanticTokenType,
+    DiagnosticSeverity, FormattingOptions, Hover, Position, SemanticTokenType,
 };
 use std::{collections::HashSet, ops::Range};
 use tracing::info;
@@ -20,15 +22,18 @@ use ropey::Rope;
 
 use crate::{
     backend::Client,
-    lang::{self, head},
+    lang::{self, head, turtle::completion::NsCompletionCtx},
     model::{spanned, Spanned},
     parent::ParentingSystem,
-    prefix::{Prefixes, Property},
+    prefix::Prefixes,
     semantics::semantic_tokens,
     utils::{position_to_offset, range_to_range},
 };
 
 use self::{
+    completion::{
+        CompletionProvider, NamespaceCompletionProvider, NamespaceCompletionProviderState,
+    },
     formatter::format_turtle,
     node::{Leaf, Node},
     token::Token,
@@ -52,10 +57,11 @@ pub struct TurtleLang {
     comments: Vec<Spanned<String>>,
     defined_prefixes: HashSet<String>,
     prefixes: Prefixes,
+    namespace_completion_provider: NamespaceCompletionProvider,
 }
 
 impl Lang for TurtleLang {
-    type State = Prefixes;
+    type State = (Prefixes, NamespaceCompletionProviderState);
 
     type Token = token::Token;
 
@@ -76,6 +82,7 @@ impl Lang for TurtleLang {
 
     const TRIGGERS: &'static [&'static str] = &[":"];
     const CODE_ACTION: bool = true;
+    const HOVER: bool = true;
 
     const LEGEND_TYPES: &'static [lsp_types::SemanticTokenType] = &[
         semantic_token::BOOLEAN,
@@ -274,7 +281,8 @@ impl Lang for TurtleLang {
                 rope: Rope::new(),
                 comments: Vec::new(),
                 defined_prefixes: HashSet::new(),
-                prefixes: state.clone(),
+                prefixes: state.0.clone(),
+                namespace_completion_provider: NamespaceCompletionProvider::new(&state.1),
             },
             CurrentLangState {
                 element: CurrentLangStatePart::new(spanned(Turtle::empty(&url), 0..1)),
@@ -327,41 +335,6 @@ impl TurtleLang {
         }
     }
 
-    fn property_to_completion(
-        &self,
-        prop: &Property,
-        prefix: &str,
-        prefix_url: &str,
-        range: lsp_types::Range,
-    ) -> SimpleCompletion {
-        let short = prop.short(prefix_url);
-        let new_text = format!("{}:{}", prefix, short);
-        let edits = vec![lsp_types::TextEdit {
-            new_text,
-            range: range.clone(),
-        }];
-
-        let label = match (&prop.comment, &prop.label) {
-            (Some(comment), Some(label)) => {
-                format!("{}: {}", label, comment)
-            }
-            (None, Some(label)) => label.clone(),
-            (Some(comment), None) => format!("{}: {}", short, comment),
-            (None, None) => short.clone(),
-        };
-
-        let documentation = Some(prop.id.clone());
-
-        SimpleCompletion {
-            kind: prop.ty.into(),
-            label,
-            documentation,
-            sort_text: Some(format!("{}:{}", prefix, short)),
-            filter_text: Some(format!("{}:{}", prefix, short)),
-            edits,
-        }
-    }
-
     fn get_undefined_prefixes<O, F: Fn(UndefinedPrefix) -> O>(
         &self,
         state: &CurrentLangState<Self>,
@@ -401,6 +374,10 @@ struct UndefinedPrefix {
 
 #[async_trait::async_trait]
 impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
+    async fn hover(&mut self, _state: &CurrentLangState<Self>, _pos: usize) -> Option<Hover> {
+        None
+    }
+
     async fn post_update_diagnostics(
         &self,
         state: &CurrentLangState<Self>,
@@ -420,49 +397,13 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
 
         sender.push_all(undefined_prefixes);
 
-        let prefixes = self.prefixes.clone();
-        let turtle = &state.element.current;
-        let prefixes_ids: Vec<_> = turtle
-            .prefixes
-            .iter()
-            .flat_map(|Spanned(ref prefix, ref span)| {
-                prefix
-                    .value
-                    .expand(turtle)
-                    .map(|pref| Spanned(pref, span.clone()))
-            })
-            .collect();
-
         if state.element.last_is_valid() {
+            let turtle = &state.element.current;
             info!("Updating prefixes for {}", self.id);
-            prefixes.update(&self.id, turtle).await;
+            self.namespace_completion_provider.update(turtle).await
+        } else {
+            async move {}.boxed()
         }
-
-        async move {
-            // Rust please
-            let sender = &sender;
-            let prefixes = &prefixes;
-
-            prefixes_ids
-                .into_iter()
-                .map(|prefix| async move {
-                    if let Err(e) = prefixes
-                        .fetch(&prefix, |_msg| async {}.boxed(), |_| {})
-                        .await
-                    {
-                        info!("sending diagnostic, {} ", prefix.value());
-                        sender.push(SimpleDiagnostic::new_severity(
-                            prefix.span().clone(),
-                            format!("Failed to fetch prefix: {}", e),
-                            DiagnosticSeverity::WARNING,
-                        ));
-                    }
-                })
-                .collect::<FuturesUnordered<_>>()
-                .count()
-                .await;
-        }
-        .boxed()
     }
 
     async fn update(&mut self, state: &CurrentLangState<Self>) {
@@ -526,27 +467,23 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
 
                 info!("m_expaned {:?}", m_expanended);
 
-                let mut out = Vec::new();
                 if let Some(expaned) = m_expanended {
                     let range = range_to_range(range, &self.rope).unwrap_or_default();
 
-                    info!("Range {:?}", range);
-                    let _ = self
-                        .prefixes
-                        .fetch(
-                            &expaned,
-                            |msg| client.log_message(MessageType::INFO, msg),
-                            |prop| {
-                                out.push(
-                                    self.property_to_completion(prop, prefix_str, &expaned, range),
-                                )
+                    let out = self
+                        .namespace_completion_provider
+                        .find_completions(
+                            &NsCompletionCtx {
+                                prefix_url: expaned,
+                                prefix: prefix_str.to_string(),
                             },
+                            range,
                         )
                         .await;
 
                     info!("Returning {} suggestions", out.len());
+                    return out;
                 }
-                return out;
             }
         }
 

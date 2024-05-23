@@ -181,6 +181,8 @@ pub fn turtle<'a>(
 
 #[cfg(test)]
 pub mod turtle_tests {
+    use std::str::FromStr;
+
     use chumsky::{prelude::Simple, Parser, Stream};
 
     use crate::lang::turtle::{
@@ -320,7 +322,8 @@ pub mod turtle_tests {
 <a> <b> <c>.
 #This is a very nice comment!
             "#;
-        let output = parse_it(txt, turtle("http://example.com/ns#")).expect("simple");
+        let url = lsp_types::Url::from_str("http://example.com/ns#").unwrap();
+        let output = parse_it(txt, turtle(&url)).expect("simple");
         assert_eq!(output.prefixes.len(), 1, "prefixes are parsed");
         assert_eq!(output.triples.len(), 1, "triples are parsed");
         assert!(output.base.is_some(), "base is parsed");

@@ -1,5 +1,3 @@
-use tracing::info;
-
 use crate::lang::turtle::{self, BlankNode, Turtle};
 
 pub struct Triple {
@@ -16,7 +14,7 @@ pub fn extract_triples(turtle: &Turtle) -> Vec<Triple> {
             turtle::Subject::BlankNode(BlankNode::Named(x)) => x.clone(),
             turtle::Subject::NamedNode(n) => {
                 if let Some(x) = n.expand(&turtle) {
-                    info!("subject {:?} -> {}", n, x);
+                    // info!("subject {:?} -> {}", n, x);
                     x
                 } else {
                     continue;

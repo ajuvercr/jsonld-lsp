@@ -123,6 +123,7 @@ impl Lang for JsonLd {
 
     const LANG: &'static str = "jsonld";
     const CODE_ACTION: bool = false;
+    const HOVER: bool = true;
 
     const TRIGGERS: &'static [&'static str] = &["@", "\""];
     const LEGEND_TYPES: &'static [SemanticTokenType] = &[

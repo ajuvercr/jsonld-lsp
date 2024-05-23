@@ -5,7 +5,7 @@ use futures::FutureExt;
 use futures::{channel::mpsc, StreamExt};
 use lsp_types::{
     CodeActionResponse, CompletionItem, CompletionItemKind, CompletionTextEdit, Diagnostic,
-    DiagnosticSeverity, Documentation, FormattingOptions, Position, SemanticToken,
+    DiagnosticSeverity, Documentation, FormattingOptions, Hover, Position, SemanticToken,
     SemanticTokenType, TextEdit, Url,
 };
 use ropey::Rope;
@@ -215,6 +215,7 @@ pub trait Lang: Sized {
     type NodeLeaf: Send + Sync + Token;
 
     const CODE_ACTION: bool;
+    const HOVER: bool;
     const LANG: &'static str;
     const TRIGGERS: &'static [&'static str];
     const LEGEND_TYPES: &'static [SemanticTokenType];
@@ -285,6 +286,22 @@ where
         _sender: DiagnosticSender,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
         async {}.boxed()
+    }
+
+    async fn hover(&mut self, state: &CurrentLangState<Self>, pos: usize) -> Option<Hover> {
+        if let Some(el) = state
+            .parents
+            .current
+            .iter()
+            .filter(|x| x.1.span().contains(&pos))
+            .min_by_key(|x| x.1.span().len())
+        {
+            match el.1.value() {
+                _ => {}
+            }
+        }
+
+        None
     }
 
     async fn update_text(

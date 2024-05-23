@@ -136,6 +136,32 @@ where
     }
 
     #[tracing::instrument(skip(self))]
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position,
+        } = params.text_document_position_params;
+
+        let rope = {
+            let ropes = self.ropes.lock().await;
+            if let Some(rope) = ropes.get(uri.as_str()) {
+                rope.clone()
+            } else {
+                return Ok(None);
+            }
+        };
+        let mut langs = self.langs.lock().await;
+        if let Some((ref mut lang, ref state)) = langs.get_mut(uri.as_str()) {
+            let pos =
+                position_to_offset(position, &rope).ok_or(Error::new(ErrorCode::InvalidRequest))?;
+
+            return Ok(lang.hover(state, pos).await);
+        }
+
+        Ok(None)
+    }
+
+    #[tracing::instrument(skip(self))]
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         info!("formatting");
         let uri = params.text_document.uri;
