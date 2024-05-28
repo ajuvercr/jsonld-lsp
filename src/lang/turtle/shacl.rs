@@ -1,17 +1,20 @@
+use lsp_types::{CompletionItemKind, Range};
 use sophia_api::{
-    ns::{self},
+    ns,
     prelude::{Any, Dataset},
     quad::Quad,
-    term::{BnodeId, IriRef, Term, TermKind},
+    term::{matcher::TermMatcher, BnodeId, GraphName, IriRef, SimpleTerm, Term, TermKind},
     MownStr,
 };
-use std::borrow::Cow;
+use std::{borrow::Cow, ops::Deref, usize};
 use tracing::info;
 
-use crate::model::Spanned;
+use crate::{lang::SimpleCompletion, model::Spanned};
 use hashbrown::HashSet;
 
 use super::{Base, Turtle};
+
+pub type MyQuad<'a> = ([MyTerm<'a>; 3], GraphName<MyTerm<'a>>);
 
 #[derive(Debug, Clone)]
 pub struct MyTerm<'a> {
@@ -91,6 +94,60 @@ impl<'a> Term for MyTerm<'a> {
     }
 }
 
+#[derive(Default, Debug)]
+pub struct Triples<'a> {
+    pub base_url: String,
+    triples: Vec<MyQuad<'a>>,
+    base: Option<MyTerm<'a>>,
+}
+
+impl<'a> Triples<'a> {
+    pub fn new(turtle: &Turtle, triples: Vec<MyQuad<'a>>) -> Self {
+        let base = match &turtle.base {
+            Some(Spanned(Base(_, Spanned(named_node, _)), _)) => named_node
+                .expand_step(turtle, HashSet::new())
+                .map(|st| MyTerm::named_node(st)),
+            None => Some(MyTerm::named_node(turtle.set_base.as_str().to_string())),
+        };
+
+        let base_url = turtle.set_base.to_string();
+        Self {
+            triples,
+            base,
+            base_url,
+        }
+    }
+
+    pub fn imports(&self, cb: impl FnMut(IriRef<MownStr<'_>>) -> ()) {
+        if let Some(ref base) = self.base {
+            self.triples
+                .quads_matching([base], [owl::imports], Any, Any)
+                .flatten()
+                .flat_map(|s| s.o().iri())
+                .for_each(cb);
+        }
+    }
+
+    pub fn sub_class_of(&self, mut cb: impl FnMut(IriRef<MownStr<'_>>, IriRef<MownStr<'_>>) -> ()) {
+        self.triples
+            .quads_matching(Any, [rdfs::subClassOf], Any, Any)
+            .flatten()
+            .flat_map(|s| match (s.s().iri(), s.o().iri()) {
+                (Some(s), Some(o)) => Some((s, o)),
+                _ => None,
+            })
+            .for_each(|(x, y)| cb(x, y));
+    }
+}
+
+impl<'a> Deref for Triples<'a> {
+    type Target = Vec<MyQuad<'a>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.triples
+    }
+}
+
 pub mod shacl {
     use sophia_api::namespace;
 
@@ -102,7 +159,9 @@ pub mod shacl {
         path,
         name,
         class,
-        datatype
+        datatype,
+        minCount,
+        maxCount
     }
 }
 
@@ -126,6 +185,15 @@ pub mod owl {
     }
 }
 
+pub mod rdfs {
+    use sophia_api::namespace;
+
+    namespace! {
+     "http://www.w3.org/2000/01/rdf-schema#",
+        subClassOf
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum PropertyType {
     Primitive(String),
@@ -137,6 +205,45 @@ pub struct Property {
     pub name: Option<String>,
     pub path: String,
     pub ty: Option<PropertyType>,
+    pub min_count: Option<usize>,
+    pub max_count: Option<usize>,
+}
+
+impl Property {
+    fn into_edit_part(&self, turtle: &Turtle, index: &mut usize) -> String {
+        info!("Editing part of {:?}", self);
+        *index += 1;
+        let path = turtle
+            .shorten(&self.path)
+            .unwrap_or(format!("<{}>", self.path));
+        let placeholder = match &self.name {
+            Some(name) => format!("${{{}:{}}}", index, name),
+            None => format!("${}", index),
+        };
+        format!("{} {}", path, placeholder)
+    }
+
+    pub fn into_completion(&self, turtle: &Turtle, range: Range) -> SimpleCompletion {
+        let path = turtle
+            .shorten(&self.path)
+            .unwrap_or(format!("<{}>", self.path));
+
+        let edits = vec![lsp_types::TextEdit {
+            new_text: path,
+            range: range.clone(),
+        }];
+
+        let label = self.name.clone().unwrap_or_else(|| self.path.clone());
+
+        SimpleCompletion {
+            kind: CompletionItemKind::PROPERTY,
+            label,
+            documentation: None,
+            sort_text: None,
+            filter_text: None,
+            edits,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -144,6 +251,38 @@ pub struct Shape {
     pub name: Option<String>,
     pub clazz: String,
     pub properties: Vec<Property>,
+}
+
+impl Shape {
+    pub fn into_completion(
+        &self,
+        turtle: &Turtle,
+        range: lsp_types::Range,
+    ) -> Option<SimpleCompletion> {
+        let mut index = 0;
+        let fields = self
+            .properties
+            .iter()
+            .map(|x| x.into_edit_part(turtle, &mut index))
+            .collect::<Vec<_>>()
+            .join(";\n    ");
+
+        let clazz_id = turtle.shorten(&self.clazz)?;
+        let new_text = format!("{};\n    {}.", clazz_id, fields);
+        let edits = vec![lsp_types::TextEdit {
+            new_text,
+            range: range.clone(),
+        }];
+
+        Some(SimpleCompletion {
+            kind: CompletionItemKind::SNIPPET,
+            label: self.name.clone().unwrap_or(self.clazz.clone()),
+            filter_text: None,
+            sort_text: None,
+            documentation: None,
+            edits,
+        })
+    }
 }
 
 fn parse_property<T: Term + std::fmt::Debug, Q: Quad>(
@@ -178,10 +317,24 @@ fn parse_property<T: Term + std::fmt::Debug, Q: Quad>(
         .and_then(|x| x.to_o().iri().map(|x| x.unwrap().to_string()))
         .map(|x| PropertyType::Clazz(x));
 
+    let min_count = data
+        .quads_matching([id_ref], [shacl::minCount], Any, Any)
+        .next()
+        .and_then(|x| x.ok())
+        .and_then(|x| x.to_o().lexical_form().and_then(|x| x.parse().ok()));
+
+    let max_count = data
+        .quads_matching([id_ref], [shacl::maxCount], Any, Any)
+        .next()
+        .and_then(|x| x.ok())
+        .and_then(|x| x.to_o().lexical_form().and_then(|x| x.parse().ok()));
+
     Some(Property {
         name,
         path,
         ty: primitive.or(clazz),
+        min_count,
+        max_count,
     })
 }
 
@@ -213,28 +366,7 @@ pub fn parse_shape<T: Term + std::fmt::Debug, Q: Quad>(data: &Vec<Q>, id_term: T
     })
 }
 
-pub fn parse_shapes(turtle: &Turtle, mut on_import: impl FnMut(&str) -> ()) -> Vec<Shape> {
-    let triples = turtle.get_simple_triples().unwrap_or_default();
-
-    if let Some(base) = match &turtle.base {
-        Some(Spanned(Base(_, Spanned(named_node, _)), _)) => named_node
-            .expand_step(turtle, HashSet::new())
-            .map(|st| MyTerm::named_node(st)),
-        None => Some(MyTerm::named_node(turtle.set_base.as_str().to_string())),
-    } {
-        triples
-            .quads_matching([&base], [owl::imports], Any, Any)
-            .flatten()
-            .flat_map(|s| s.o().iri())
-            .for_each(|x| on_import(x.as_str()));
-    }
-
-    info!(
-        "Parsing shapes  {} ({} triples)",
-        turtle.set_base.as_str(),
-        triples.len()
-    );
-
+pub fn parse_shapes(triples: &Triples<'_>) -> Vec<Shape> {
     triples
         .quads_matching(Any, [ns::rdf::type_], [shacl::NodeShape], Any)
         .flatten()

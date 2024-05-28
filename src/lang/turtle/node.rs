@@ -55,8 +55,8 @@ impl Into<Leaf> for String {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PO {
-    predicate: usize,
-    objects: Vec<usize>,
+    pub predicate: usize,
+    pub objects: Vec<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, EnumIntoGetters, EnumIsA, EnumToGetters)]
@@ -69,6 +69,24 @@ pub enum Node {
     Root(Vec<usize>),
     Collection(Vec<usize>),
     Invalid,
+}
+
+impl Node {
+    pub fn ty_str(&self) -> &'static str {
+        match self {
+            Node::Leaf(Leaf::Invalid) => "leaf(invalid)",
+            Node::Leaf(Leaf::Literal(_)) => "leaf(literal)",
+            Node::Leaf(Leaf::NamedNode(_)) => "leaf(namednode)",
+            Node::Leaf(Leaf::BlankNode(_)) => "leaf(blanknod)",
+            Node::Triple { .. } => "triple",
+            Node::BlankNode { .. } => "blanknode",
+            Node::Base(_, _) => "base",
+            Node::Prefix(_, _, _) => "prefix",
+            Node::Root(_) => "root",
+            Node::Collection(_) => "collection",
+            Node::Invalid => "invalid",
+        }
+    }
 }
 
 impl common::Node<Leaf> for Node {
@@ -212,7 +230,7 @@ impl ParentingSystem<Spanned<Node>> {
             root.push(this.add_triple(triple, root_id));
         }
 
-        this.objects[root_id] = spanned(Node::Root(root), span);
+        this.objects[root_id] = spanned(Node::Root(root), span.clone());
         this
     }
 }

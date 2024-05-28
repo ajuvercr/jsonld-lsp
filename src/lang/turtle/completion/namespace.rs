@@ -44,9 +44,7 @@ impl NamespaceCompletion {
             }
         }
     }
-}
 
-impl NamespaceCompletion {
     fn into_completion(&self, ctx: &NsCompletionCtx, range: lsp_types::Range) -> SimpleCompletion {
         let short = self.short(&ctx.prefix_url);
         let new_text = format!("{}:{}", ctx.prefix, short);
@@ -80,21 +78,16 @@ impl NamespaceCompletion {
 pub type NamespaceCompletionProviderState = Arc<Mutex<HashMap<String, Vec<NamespaceCompletion>>>>;
 #[derive(Clone)]
 pub struct NamespaceCompletionProvider {
-    found_properties: Arc<Mutex<HashMap<String, Vec<NamespaceCompletion>>>>,
+    found_properties: NamespaceCompletionProviderState,
 }
-impl NamespaceCompletionProvider {}
-
-#[async_trait::async_trait]
-impl CompletionProvider<NsCompletionCtx> for NamespaceCompletionProvider {
-    type State = NamespaceCompletionProviderState;
-
-    fn new(found_properties: &Arc<Mutex<HashMap<String, Vec<NamespaceCompletion>>>>) -> Self {
+impl NamespaceCompletionProvider {
+    pub fn new(state: &NamespaceCompletionProviderState) -> Self {
         Self {
-            found_properties: found_properties.clone(),
+            found_properties: state.clone(),
         }
     }
 
-    async fn update(
+    pub async fn update(
         &self,
         turtle: &Turtle,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
@@ -118,13 +111,20 @@ impl CompletionProvider<NsCompletionCtx> for NamespaceCompletionProvider {
                     if let Ok(turtle) = parse(&resp.body, &lsp_types::Url::parse(&prefix).unwrap())
                     {
                         do_update(&turtle, &this).await;
+                        continue;
                     }
                 }
+
+                let mut props = this.found_properties.lock().await;
+                props.insert(prefix.to_string(), vec![]);
             }
         }
         .boxed()
     }
+}
 
+#[async_trait::async_trait]
+impl CompletionProvider<NsCompletionCtx> for NamespaceCompletionProvider {
     async fn find_completions(&self, ctx: &NsCompletionCtx, range: Range) -> Vec<SimpleCompletion> {
         let props = self.found_properties.lock().await;
 

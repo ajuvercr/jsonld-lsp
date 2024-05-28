@@ -2,7 +2,10 @@ use hashbrown::HashSet;
 use sophia_api::term::GraphName;
 use sophia_iri::resolve::{BaseIri, IriParseError};
 
-use super::{shacl::MyTerm, token::StringStyle};
+use super::{
+    shacl::{MyTerm, Triples},
+    token::StringStyle,
+};
 use crate::model::Spanned;
 use std::{fmt::Display, ops::Range};
 
@@ -239,6 +242,13 @@ pub struct Prefix {
     pub prefix: Spanned<String>,
     pub value: Spanned<NamedNode>,
 }
+impl Prefix {
+    fn shorten(&self, turtle: &Turtle, url: &str) -> Option<String> {
+        let prefix_url = self.value.expand(turtle)?;
+        let short = url.strip_prefix(&prefix_url)?;
+        Some(format!("{}:{}", self.prefix.value(), short))
+    }
+}
 impl Display for Prefix {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -269,9 +279,7 @@ impl Turtle {
         Self::new(None, Vec::new(), Vec::new(), location)
     }
 
-    pub fn get_simple_triples<'a>(
-        &'a self,
-    ) -> Result<Vec<([MyTerm<'a>; 3], GraphName<MyTerm<'a>>)>, TurtleSimpleError> {
+    pub fn get_simple_triples<'a>(&'a self) -> Result<Triples<'a>, TurtleSimpleError> {
         let mut blank_nodes = 0;
         let mut out = Vec::new();
 
@@ -377,7 +385,7 @@ impl Turtle {
             }
         }
 
-        Ok(out)
+        Ok(Triples::new(self, out))
     }
 }
 
@@ -398,6 +406,13 @@ impl Turtle {
 
     pub fn get_base(&self) -> &lsp_types::Url {
         &self.set_base
+    }
+
+    pub fn shorten(&self, url: &str) -> Option<String> {
+        self.prefixes
+            .iter()
+            .flat_map(|pref| pref.shorten(self, url))
+            .next()
     }
 }
 

@@ -5,8 +5,8 @@ use futures::FutureExt;
 use futures::{channel::mpsc, StreamExt};
 use lsp_types::{
     CodeActionResponse, CompletionItem, CompletionItemKind, CompletionTextEdit, Diagnostic,
-    DiagnosticSeverity, Documentation, FormattingOptions, Hover, Position, SemanticToken,
-    SemanticTokenType, TextEdit, Url,
+    DiagnosticSeverity, Documentation, FormattingOptions, Hover, InsertTextFormat, Position,
+    SemanticToken, SemanticTokenType, TextEdit, Url,
 };
 use ropey::Rope;
 use tracing::debug;
@@ -80,6 +80,8 @@ impl Into<CompletionItem> for SimpleCompletion {
             label,
             kind: Some(kind),
             sort_text,
+            insert_text_format: (kind == CompletionItemKind::SNIPPET)
+                .then_some(InsertTextFormat::SNIPPET),
             filter_text,
             documentation: documentation.map(|st| Documentation::String(st)),
             text_edit,

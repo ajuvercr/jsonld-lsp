@@ -31,6 +31,17 @@ impl<E> ParentingSystem<E> {
         }
     }
 
+    pub fn find<'a>(
+        &'a self,
+        mut idx: usize,
+        mut found: impl FnMut(&'a E) -> bool,
+    ) -> Option<(usize, &'a E)> {
+        while !found(&self.objects[idx]) {
+            idx = self.parent(idx)?.0;
+        }
+        Some((idx, &self.objects[idx]))
+    }
+
     pub fn start_element(&self) -> Option<&E> {
         if let Some(x) = self.start {
             Some(&self[x])
