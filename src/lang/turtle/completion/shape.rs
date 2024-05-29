@@ -62,7 +62,17 @@ impl ShapeCompletionProvider {
         &self,
         turtle: &Turtle,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
-        let triples = turtle.get_simple_triples().unwrap_or_default();
+        let triples = match turtle.get_simple_triples() {
+            Ok(x) => {
+                info!("Successfully get_simple_triples for {}", turtle.set_base);
+                x
+            }
+            Err(e) => {
+                info!("Failed to get_simple_triples {:?}", e);
+                Default::default()
+            }
+        };
+
         let mut todo: Vec<String> = vec![];
         self.set_shapes(&triples, &mut todo).await;
         self.set_sub_classes(&triples).await;
@@ -73,7 +83,16 @@ impl ShapeCompletionProvider {
             while let Some(url) = todo.pop() {
                 if let Ok(resp) = fetch(&url, &headers).await {
                     if let Ok(turtle) = parse(&resp.body, &lsp_types::Url::parse(&url).unwrap()) {
-                        let triples = turtle.get_simple_triples().unwrap_or_default();
+                        let triples = match turtle.get_simple_triples() {
+                            Ok(x) => {
+                                info!("Successfully get_simple_triples for {}", turtle.set_base);
+                                x
+                            }
+                            Err(e) => {
+                                info!("Failed to get_simple_triples {:?}", e);
+                                Default::default()
+                            }
+                        };
                         this.set_shapes(&triples, &mut todo).await;
                         this.set_sub_classes(&triples).await;
                     }
@@ -185,18 +204,6 @@ impl ShapeCompletionProvider {
         range: Range,
     ) -> Option<Vec<SimpleCompletion>> {
         let parents = &ctx.state.parents.last_valid;
-
-        info!("Parent count {}", parents.iter().count());
-        for n in parents.iter() {
-            let span = n.1.span();
-            info!(
-                "{}: Span {:?} contains loc {} {}",
-                n.1.ty_str(),
-                span,
-                ctx.loc,
-                span.contains(&ctx.loc)
-            );
-        }
 
         let (idx, _) = parents
             .iter()

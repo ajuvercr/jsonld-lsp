@@ -49,11 +49,11 @@ impl NamespaceCompletion {
         let short = self.short(&ctx.prefix_url);
         let new_text = format!("{}:{}", ctx.prefix, short);
         let edits = vec![lsp_types::TextEdit {
-            new_text,
+            new_text: new_text.clone(),
             range: range.clone(),
         }];
 
-        let label = match (&self.comment, &self.label) {
+        let docs = match (&self.comment, &self.label) {
             (Some(comment), Some(label)) => {
                 format!("{}: {}", label, comment)
             }
@@ -62,14 +62,12 @@ impl NamespaceCompletion {
             (None, None) => short.clone(),
         };
 
-        let documentation = Some(self.id.clone());
-
         SimpleCompletion {
             kind: self.ty.into(),
-            label,
-            documentation,
-            sort_text: Some(format!("{}:{}", ctx.prefix, short)),
-            filter_text: Some(format!("{}:{}", ctx.prefix, short)),
+            label: new_text,
+            documentation: Some(docs),
+            sort_text: None,
+            filter_text: None,
             edits,
         }
     }

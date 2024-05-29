@@ -231,7 +231,7 @@ pub async fn turtle_backend(client: WebClient) -> Option<TurtleWebBackend> {
     let prefixes = Prefixes::new().await?;
 
     Some(TurtleWebBackend {
-        inner: Backend::new(client, prefixes),
+        inner: Backend::new(client, (prefixes, Default::default(), Default::default())),
     })
 }
 

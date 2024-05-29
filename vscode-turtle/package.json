@@ -4,7 +4,7 @@
 	"displayName": "turtle lsp",
 	"description": "A language server and language definition for turtle",
 	"author": "Arthur Vercruysse",
-  "icon": "icon.png",
+	"icon": "icon.png",
 	"license": "MIT",
 	"version": "0.0.3",
 	"repository": "https://github.com/ajuvercr/jsonld-lsp/",
@@ -23,7 +23,9 @@
 	"browser": "./client/dist/browserClientMain",
 	"configurationDefaults": {
 		"[turtle]": {
-			"editor.semanticHighlighting.enabled": true
+			"editor.semanticHighlighting.enabled": true,
+			"editor.tabCompletion": "onlySnippets",
+			"editor.snippetSuggestions": "top"
 		}
 	},
 	"contributes": {

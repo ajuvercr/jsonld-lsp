@@ -274,6 +274,55 @@ pub struct Turtle {
     pub triples: Vec<Spanned<Triple>>,
 }
 
+enum Item<'a> {
+    PO(&'a Vec<Spanned<PO>>),
+    This(MyTerm<'a>, Result<&'a Term, MyTerm<'a>>),
+}
+impl<'a> From<&'a Vec<Spanned<PO>>> for Item<'a> {
+    fn from(value: &'a Vec<Spanned<PO>>) -> Self {
+        Self::PO(value)
+    }
+}
+impl<'a> Item<'a> {
+    fn from_pred(pred: &'a str, term: Result<&'a Term, MyTerm<'a>>) -> Self {
+        Self::This(MyTerm::named_node(pred), term)
+    }
+
+    fn handle(
+        self,
+        turtle: &Turtle,
+        base: &BaseIri<String>,
+        mut cb: impl FnMut(&MyTerm<'a>, Result<&'a Term, MyTerm<'a>>) -> Result<(), TurtleSimpleError>,
+    ) -> Result<(), TurtleSimpleError> {
+        match self {
+            Item::PO(pos) => {
+                for Spanned(PO { predicate, object }, _) in pos.iter() {
+                    let predicate = MyTerm::named_node(
+                        predicate
+                            .value()
+                            .expand_step(turtle, HashSet::new())
+                            .ok_or(TurtleSimpleError::UnexpectedBase(
+                                "Expected valid named node for object",
+                            ))
+                            .and_then(|n| {
+                                base.resolve(n.as_str())
+                                    .map_err(|e| TurtleSimpleError::Parse(e))
+                            })
+                            .map(|x| x.unwrap())?,
+                    );
+                    for o in object.iter() {
+                        cb(&predicate, Ok(&o))?;
+                    }
+                }
+            }
+            Item::This(predicate, object) => {
+                cb(&predicate, object)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Turtle {
     pub fn empty(location: &lsp_types::Url) -> Self {
         Self::new(None, Vec::new(), Vec::new(), location)
@@ -281,6 +330,11 @@ impl Turtle {
 
     pub fn get_simple_triples<'a>(&'a self) -> Result<Triples<'a>, TurtleSimpleError> {
         let mut blank_nodes = 0;
+
+        let mut blank_node = move || {
+            blank_nodes += 1;
+            MyTerm::blank_node(format!("internal_bnode_{}", blank_nodes))
+        };
         let mut out = Vec::new();
 
         let base = match &self.base {
@@ -299,9 +353,8 @@ impl Turtle {
             let sub = match triple.subject.value() {
                 Subject::BlankNode(BlankNode::Named(vs)) => MyTerm::blank_node(vs),
                 Subject::BlankNode(BlankNode::Unnamed(vs)) => {
-                    blank_nodes += 1;
-                    let out = MyTerm::blank_node(format!("internal_bnode_{}", blank_nodes));
-                    todo.push((out.clone(), vs));
+                    let out = blank_node();
+                    todo.push((out.clone(), Item::from(vs)));
                     out
                 }
                 Subject::BlankNode(BlankNode::Invalid) => {
@@ -321,68 +374,77 @@ impl Turtle {
                         .map(|x| x.unwrap())?,
                 ),
             };
-            todo.push((sub.clone(), &triple.po));
+            todo.push((sub.clone(), Item::from(&triple.po)));
         }
 
         while let Some((sub, po)) = todo.pop() {
-            for Spanned(PO { predicate, object }, _) in po {
-                let predicate = MyTerm::named_node(
-                    predicate
-                        .value()
-                        .expand_step(self, HashSet::new())
-                        .ok_or(TurtleSimpleError::UnexpectedBase(
-                            "Expected valid named node for object",
-                        ))
-                        .and_then(|n| {
-                            base.resolve(n.as_str())
-                                .map_err(|e| TurtleSimpleError::Parse(e))
-                        })
-                        .map(|x| x.unwrap())?,
-                );
+            let handle = |predicate: &MyTerm<'a>, term: Result<&'a Term, MyTerm<'a>>| {
+                let object = match term {
+                    Ok(Term::NamedNode(nn)) => MyTerm::named_node(
+                        nn.expand_step(self, HashSet::new())
+                            .ok_or(TurtleSimpleError::UnexpectedBase(
+                                "Expected valid named node for object",
+                            ))
+                            .and_then(|n| {
+                                base.resolve(n.as_str())
+                                    .map_err(|e| TurtleSimpleError::Parse(e))
+                            })
+                            .map(|x| x.unwrap())?,
+                    ),
+                    Ok(Term::Literal(literal)) => MyTerm::literal(literal.plain_string()),
+                    Ok(Term::BlankNode(bn)) => match bn {
+                        BlankNode::Named(v) => MyTerm::blank_node(v),
+                        BlankNode::Unnamed(v) => {
+                            let out = blank_node();
+                            todo.push((out.clone(), Item::from(v)));
+                            out
+                        }
+                        BlankNode::Invalid => {
+                            return Err(TurtleSimpleError::UnexpectedBase(
+                                "Unexpected invalid blank for object",
+                            ))
+                        }
+                    },
+                    Ok(Term::Collection(terms)) => {
+                        let mut prev =
+                            MyTerm::named_node("http://www.w3.org/1999/02/22-rdf-syntax-ns#nil");
 
-                for Spanned(term, _) in object {
-                    let object = match term {
-                        Term::NamedNode(nn) => MyTerm::named_node(
-                            nn.expand_step(self, HashSet::new())
-                                .ok_or(TurtleSimpleError::UnexpectedBase(
-                                    "Expected valid named node for object",
-                                ))
-                                .and_then(|n| {
-                                    base.resolve(n.as_str())
-                                        .map_err(|e| TurtleSimpleError::Parse(e))
-                                })
-                                .map(|x| x.unwrap())?,
-                        ),
-                        Term::Literal(literal) => MyTerm::literal(literal.plain_string()),
-                        Term::BlankNode(bn) => match bn {
-                            BlankNode::Named(v) => MyTerm::blank_node(v),
-                            BlankNode::Unnamed(v) => {
-                                blank_nodes += 1;
-                                let out =
-                                    MyTerm::blank_node(format!("internal_bnode_{}", blank_nodes));
-                                todo.push((out.clone(), v));
-                                out
-                            }
-                            BlankNode::Invalid => {
-                                return Err(TurtleSimpleError::UnexpectedBase(
-                                    "Unexpected invalid blank for object",
-                                ))
-                            }
-                        },
-                        Term::Collection(_) => {
-                            return Err(TurtleSimpleError::UnexpectedBase(
-                                "Collection terms are not yet supported",
-                            ))
+                        for Spanned(term, _) in terms.iter().rev() {
+                            let next = blank_node();
+
+                            todo.push((
+                                next.clone(),
+                                Item::from_pred(
+                                    "http://www.w3.org/1999/02/22-rdf-syntax-ns#first",
+                                    Ok(term),
+                                ),
+                            ));
+                            todo.push((
+                                next.clone(),
+                                Item::from_pred(
+                                    "http://www.w3.org/1999/02/22-rdf-syntax-ns#rest",
+                                    Err(prev.clone()),
+                                ),
+                            ));
+
+                            prev = next;
                         }
-                        Term::Invalid => {
-                            return Err(TurtleSimpleError::UnexpectedBase(
-                                "Unexpected invalid object",
-                            ))
-                        }
-                    };
-                    out.push(([sub.clone(), predicate.clone(), object], GraphName::None));
-                }
-            }
+
+                        prev
+                    }
+                    Ok(Term::Invalid) => {
+                        return Err(TurtleSimpleError::UnexpectedBase(
+                            "Unexpected invalid object",
+                        ))
+                    }
+                    Err(x) => x,
+                };
+                out.push(([sub.clone(), predicate.clone(), object], GraphName::None));
+
+                Ok(())
+            };
+
+            po.handle(self, &base, handle)?;
         }
 
         Ok(Triples::new(self, out))
@@ -439,12 +501,12 @@ impl Display for Turtle {
 #[cfg(test)]
 mod test {
 
-    use std::str::FromStr;
+    use std::{collections::HashSet, str::FromStr};
 
     use chumsky::{Parser, Stream};
 
     use crate::{
-        lang::turtle::{parser::turtle, tokenizer, Turtle},
+        lang::turtle::{parser::turtle, shacl::MyQuad, tokenizer, Turtle},
         model::{spanned, Spanned},
     };
 
@@ -522,5 +584,35 @@ mod test {
         let triples = output.get_simple_triples().expect("Triples found");
 
         assert_eq!(triples.len(), 6);
+    }
+
+    #[test]
+    fn triples_collection() {
+        let txt = r#"
+<e> <pred> (<a> <b> <c>).
+"#;
+
+        let url = lsp_types::Url::from_str("http://example.com/ns#").unwrap();
+        let (output, _) = parse_turtle(txt, &url).expect("Simple collection");
+        let triples = output.get_simple_triples().expect("Triples found");
+
+        let a: &Vec<MyQuad<'_>> = &triples;
+
+        let quads: HashSet<String> = a
+            .iter()
+            .map(|triple| format!("{} {} {}.", triple.0[0], triple.0[1], triple.0[2]))
+            .collect();
+
+        let expected_quads: HashSet<String> = "<http://example.com/e> <http://example.com/pred> <internal_bnode_3>.
+<internal_bnode_3> <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> <internal_bnode_2>.
+<internal_bnode_3> <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> <http://example.com/a>.
+<internal_bnode_2> <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> <internal_bnode_1>.
+<internal_bnode_2> <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> <http://example.com/b>.
+<internal_bnode_1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> <http://www.w3.org/1999/02/22-rdf-syntax-ns#nil>.
+<internal_bnode_1> <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> <http://example.com/c>.".split("\n").map(|x|x.trim()).map(String::from).collect();
+
+        assert_eq!(quads, expected_quads);
+
+        assert_eq!(triples.len(), 7);
     }
 }

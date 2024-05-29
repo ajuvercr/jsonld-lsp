@@ -24,12 +24,17 @@ pub fn semantic_tokens<L: Lang>(
         token.for_each(|i| tokens[i] = Some(ty.clone()));
     });
 
+    let tokens_len = tokens.len();
     state
         .parents
         .last_valid
         .iter()
         .flat_map(|(_, x)| x.leaf().map(|t| spanned(t, x.span().clone())))
         .flat_map(|s| s.value().token().map(|t| (s.span().clone(), t)))
+        .map(|(mut range, ty)| {
+            range.end = range.end.min(tokens_len);
+            (range, ty)
+        })
         .for_each(|(range, ty)| {
             if range.clone().all(|i| tokens[i].is_none()) {
                 range.for_each(|i| tokens[i] = Some(ty.clone()));

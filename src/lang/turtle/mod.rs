@@ -400,7 +400,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                 SimpleDiagnostic::new_severity(
                     range,
                     format!("Prefix {} not defined", prefix),
-                    DiagnosticSeverity::ERROR,
+                    DiagnosticSeverity::HINT,
                 )
             },
         );
@@ -516,7 +516,6 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                             .find_completions(&shape_ctx, range.clone())
                             .await,
                     );
-
                     completions.extend(
                         self.namespace_completion_provider
                             .find_completions(

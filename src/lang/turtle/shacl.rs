@@ -1,9 +1,9 @@
-use lsp_types::{CompletionItemKind, Range};
+use lsp_types::{CompletionItemKind, Documentation, Range};
 use sophia_api::{
     ns,
     prelude::{Any, Dataset},
     quad::Quad,
-    term::{matcher::TermMatcher, BnodeId, GraphName, IriRef, SimpleTerm, Term, TermKind},
+    term::{BnodeId, GraphName, IriRef, Term, TermKind},
     MownStr,
 };
 use std::{borrow::Cow, ops::Deref, usize};
@@ -20,6 +20,12 @@ pub type MyQuad<'a> = ([MyTerm<'a>; 3], GraphName<MyTerm<'a>>);
 pub struct MyTerm<'a> {
     value: Cow<'a, str>,
     ty: TermKind,
+}
+
+impl<'a> std::fmt::Display for MyTerm<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<{}>", self.value)
+    }
 }
 
 impl<'a> MyTerm<'a> {
@@ -40,6 +46,10 @@ impl<'a> MyTerm<'a> {
             value: value.into(),
             ty: TermKind::Literal,
         }
+    }
+
+    pub fn as_str(&'a self) -> &'a str {
+        &self.value
     }
 }
 
@@ -229,18 +239,18 @@ impl Property {
             .unwrap_or(format!("<{}>", self.path));
 
         let edits = vec![lsp_types::TextEdit {
-            new_text: path,
+            new_text: path.clone(),
             range: range.clone(),
         }];
 
-        let label = self.name.clone().unwrap_or_else(|| self.path.clone());
+        let label = format!("{} (class property)", path);
 
         SimpleCompletion {
             kind: CompletionItemKind::PROPERTY,
             label,
-            documentation: None,
+            documentation: self.name.clone(),
+            filter_text: Some(path),
             sort_text: None,
-            filter_text: None,
             edits,
         }
     }
@@ -260,9 +270,18 @@ impl Shape {
         range: lsp_types::Range,
     ) -> Option<SimpleCompletion> {
         let mut index = 0;
+
+        let required = self
+            .properties
+            .iter()
+            .filter(|prop| prop.min_count.unwrap_or(0) > 0)
+            .count();
+        let total = self.properties.len();
+
         let fields = self
             .properties
             .iter()
+            .filter(|prop| prop.min_count.unwrap_or(0) > 0)
             .map(|x| x.into_edit_part(turtle, &mut index))
             .collect::<Vec<_>>()
             .join(";\n    ");
@@ -274,12 +293,17 @@ impl Shape {
             range: range.clone(),
         }];
 
+        let description = format!(
+            "Snippet for {}, with {} reqruied properties (out of {})",
+            clazz_id, required, total
+        );
+
         Some(SimpleCompletion {
             kind: CompletionItemKind::SNIPPET,
-            label: self.name.clone().unwrap_or(self.clazz.clone()),
-            filter_text: None,
+            label: format!("{} (snippet)", clazz_id),
+            filter_text: Some(clazz_id),
             sort_text: None,
-            documentation: None,
+            documentation: Some(description),
             edits,
         })
     }
@@ -339,7 +363,7 @@ fn parse_property<T: Term + std::fmt::Debug, Q: Quad>(
 }
 
 pub fn parse_shape<T: Term + std::fmt::Debug, Q: Quad>(data: &Vec<Q>, id_term: T) -> Option<Shape> {
-    info!("Trying to parse shape {:?}", id_term);
+    info!("{:?} Trying to parse shape", id_term);
     let id_ref = id_term.borrow_term();
     let name = data
         .quads_matching([id_ref], [shacl::name], Any, Any)
@@ -359,6 +383,8 @@ pub fn parse_shape<T: Term + std::fmt::Debug, Q: Quad>(data: &Vec<Q>, id_term: T
         .flat_map(|id| parse_property(data, id.to_o()))
         .collect();
 
+    info!("{:?} Success!", id_term);
+
     Some(Shape {
         name,
         clazz,
@@ -367,6 +393,11 @@ pub fn parse_shape<T: Term + std::fmt::Debug, Q: Quad>(data: &Vec<Q>, id_term: T
 }
 
 pub fn parse_shapes(triples: &Triples<'_>) -> Vec<Shape> {
+    info!(
+        "Parsing shapes from {} ({} triples)",
+        triples.base_url,
+        triples.triples.len()
+    );
     triples
         .quads_matching(Any, [ns::rdf::type_], [shacl::NodeShape], Any)
         .flatten()
