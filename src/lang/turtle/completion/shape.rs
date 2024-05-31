@@ -58,9 +58,9 @@ impl ShapeCompletionProvider {
             self.shapes
                 .values()
                 .flatten()
-                .filter(|shape| &shape.clazz == class)
+                .filter(|shape| shape.name() == class)
                 .flat_map(|prop: &Shape| {
-                    info!("Looking into shape {}", prop.clazz);
+                    info!("Looking into shape {}", prop.name());
                     prop.into_completion(turtle, range)
                 }),
         );

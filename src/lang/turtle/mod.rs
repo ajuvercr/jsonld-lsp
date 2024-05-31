@@ -446,6 +446,13 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
             .iter()
             .position(|x| x.1.contains(&location));
 
+        if let Some(idx) = current_token_idx {
+            info!("Current token {}", state.tokens.current[idx].value());
+            if idx > 0 {
+                info!("Previous token {}", state.tokens.current[idx - 1].value());
+            }
+        }
+
         let range = current_token_idx
             .as_ref()
             .map(|x| range_to_range(&state.tokens.current[*x].1, &self.rope).unwrap_or_default())
@@ -471,7 +478,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
         );
 
         info!(
-            "Current type {:?}",
+            "Current token {:?}",
             current_token_idx
                 .as_ref()
                 .map(|idx| &state.tokens.current[*idx])
@@ -479,7 +486,6 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
 
         if let Some(token_idx) = current_token_idx {
             if token_idx > 0 {
-                info!("Prev token  {:?}", &state.tokens.current[token_idx - 1]);
                 let ctx = NextTokenCompletionCtx {
                     turtle: &state.element.last_valid,
                     triples: &triples,
@@ -493,6 +499,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                         .await,
                 );
             }
+
             let token = &state.tokens.current[token_idx];
             info!("For token {:?}", token);
             let range = range_to_range(token.span(), &self.rope).unwrap_or_default();

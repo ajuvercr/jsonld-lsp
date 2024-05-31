@@ -240,9 +240,12 @@ pub mod shacl {
         NodeShape,
         property,
         targetClass,
+        targetSubjectsOf,
+        targetObjectsOf,
         path,
         name,
         class,
+        node,
         datatype,
         minCount,
         maxCount
@@ -333,8 +336,11 @@ impl Property {
 #[derive(Clone, Debug)]
 pub struct Shape {
     pub name: Option<String>,
-    pub clazz: String,
+    pub clazz: Option<String>,
+    pub node: String,
     pub properties: Vec<Property>,
+    pub target_objects_of: Option<String>,
+    pub target_subjects_of: Option<String>,
 }
 
 impl Shape {
@@ -360,7 +366,7 @@ impl Shape {
             .collect::<Vec<_>>()
             .join(";\n    ");
 
-        let clazz_id = turtle.shorten(&self.clazz)?;
+        let clazz_id = turtle.shorten(self.name())?;
         let new_text = format!("{};\n    {}.", clazz_id, fields);
         let edits = vec![lsp_types::TextEdit {
             new_text,
@@ -382,16 +388,26 @@ impl Shape {
         })
     }
 
+    pub fn name<'a>(&'a self) -> &'a str {
+        self.clazz.as_ref().unwrap_or(&self.node)
+    }
+
     pub fn get_properties(&self, provider: &mut impl ClassProvider) -> Vec<green::Property> {
-        let domain = provider.named(&self.clazz);
-        self.properties
+        if let Some(claz) = &self.clazz {
+            let claz_id = provider.named(claz);
+            let node_id = provider.named(&self.node);
+            provider.add_subclass(claz_id, node_id);
+        }
+
+        let domain = provider.named(self.name());
+
+        let mut props: Vec<_> = self
+            .properties
             .iter()
-            .map(move |prop| {
+            .map(|prop| {
                 let range = match &prop.ty {
                     Some(PropertyType::Clazz(class)) => green::Range::Class(provider.named(&class)),
-                    Some(PropertyType::Primitive(primitive)) => {
-                        green::Range::Primitive("Some primitive")
-                    }
+                    Some(PropertyType::Primitive(_)) => green::Range::Primitive("Some primitive"),
                     None => green::Range::Class(provider.unnamed(None, "shacl")),
                 };
 
@@ -402,7 +418,29 @@ impl Shape {
                     required: prop.min_count.clone().unwrap_or(0) > 0,
                 }
             })
-            .collect()
+            .collect();
+
+        if let Some(target_objects_of) = &self.target_objects_of {
+            let prop = green::Property {
+                range: green::Range::Class(domain),
+                domain: provider.unnamed(None, "target_objects_of"),
+                property: MyTerm::named_node(target_objects_of).to_owned(),
+                required: false,
+            };
+            props.push(prop);
+        }
+
+        if let Some(target_subjects_of) = &self.target_subjects_of {
+            let prop = green::Property {
+                range: green::Range::Class(provider.unnamed(None, "target_subjects_of")),
+                domain,
+                property: MyTerm::named_node(target_subjects_of).to_owned(),
+                required: false,
+            };
+            props.push(prop);
+        }
+
+        props
     }
 }
 
@@ -432,7 +470,7 @@ fn parse_property<T: Term + std::fmt::Debug, Q: Quad>(
         .map(|x| PropertyType::Primitive(x));
 
     let clazz = data
-        .quads_matching([id_ref], [shacl::class], Any, Any)
+        .quads_matching([id_ref], [shacl::class, shacl::node], Any, Any)
         .next()
         .and_then(|x| x.ok())
         .and_then(|x| x.to_o().iri().map(|x| x.unwrap().to_string()))
@@ -459,11 +497,34 @@ fn parse_property<T: Term + std::fmt::Debug, Q: Quad>(
     })
 }
 
+fn term_to_string(term: impl Term) -> Option<String> {
+    if let Some(iri) = term.iri() {
+        return Some(iri.as_str().to_string());
+    }
+    if let Some(iri) = term.bnode_id() {
+        return Some(iri.as_str().to_string());
+    }
+    None
+}
+
 pub fn parse_shape<T: Term + std::fmt::Debug, Q: Quad>(data: &Vec<Q>, id_term: T) -> Option<Shape> {
     info!("{:?} Trying to parse shape", id_term);
     let id_ref = id_term.borrow_term();
+    let node = term_to_string(id_ref).unwrap_or_else(|| String::from("Unnamed node???"));
     let name = data
         .quads_matching([id_ref], [shacl::name], Any, Any)
+        .next()
+        .and_then(|x| x.ok())
+        .and_then(|x| x.to_o().lexical_form().map(|x| x.to_string()));
+
+    let target_subjects_of = data
+        .quads_matching([id_ref], [shacl::targetSubjectsOf], Any, Any)
+        .next()
+        .and_then(|x| x.ok())
+        .and_then(|x| x.to_o().lexical_form().map(|x| x.to_string()));
+
+    let target_objects_of = data
+        .quads_matching([id_ref], [shacl::targetObjectsOf], Any, Any)
         .next()
         .and_then(|x| x.ok())
         .and_then(|x| x.to_o().lexical_form().map(|x| x.to_string()));
@@ -472,7 +533,7 @@ pub fn parse_shape<T: Term + std::fmt::Debug, Q: Quad>(data: &Vec<Q>, id_term: T
         .quads_matching([id_ref], [shacl::targetClass], Any, Any)
         .next()
         .and_then(|x| x.ok())
-        .and_then(|x| x.to_o().iri().map(|x| x.unwrap().to_string()))?;
+        .and_then(|x| x.to_o().iri().map(|x| x.unwrap().to_string()));
 
     let properties = data
         .quads_matching([id_ref], [shacl::property], Any, Any)
@@ -483,8 +544,11 @@ pub fn parse_shape<T: Term + std::fmt::Debug, Q: Quad>(data: &Vec<Q>, id_term: T
     info!("{:?} Success!", id_term);
 
     Some(Shape {
+        node,
         name,
         clazz,
+        target_subjects_of,
+        target_objects_of,
         properties,
     })
 }

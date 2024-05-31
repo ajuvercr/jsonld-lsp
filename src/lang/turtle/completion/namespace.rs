@@ -31,25 +31,19 @@ use hashbrown::{HashMap, HashSet};
 #[derive(Default, Debug)]
 struct NamespaceState {
     triples: Triples<'static>,
-    prefixes: Vec<String>,
 }
 
 impl NamespaceState {
     fn new(turtle: &Turtle) -> Self {
         let triples = turtle.get_simple_triples().unwrap_or_default().to_owned();
-        let prefixes = turtle
-            .prefixes
-            .iter()
-            .flat_map(|x| x.value.expand(turtle))
-            .collect();
 
-        Self { triples, prefixes }
+        Self { triples }
     }
 }
 #[derive(Clone, Default)]
 pub struct NamespaceCompletionProvider {
     ontology_states: Arc<Mutex<HashMap<String, NamespaceState>>>,
-    properties: Arc<Mutex<Vec<Property>>>,
+    properties: Arc<Mutex<HashMap<String, Vec<Property>>>>,
     provider: Arc<Mutex<BasicClassProvider>>,
     types: Arc<Mutex<HashMap<MyTerm<'static>, HashSet<usize>>>>,
 
@@ -78,8 +72,10 @@ impl NamespaceCompletionProvider {
 
         do_update(turtle, self, &mut prefixes).await;
 
-        let this = self.clone();
         let url = turtle.set_base.to_string();
+        let this = self.clone();
+        update_types(&url, &this).await;
+
         async move {
             let headers = [("Accept".to_string(), "text/turtle".to_string())].into();
             while let Some(prefix) = prefixes.pop() {
@@ -115,6 +111,10 @@ impl<'a> CompletionProvider<NsCompletionCtx<'a>> for NamespaceCompletionProvider
         if let Some(triple) = triples
             .triples
             .iter()
+            .map(|x| {
+                info!("({}) Maybe triple {}", x.span.contains(&ctx.location), x);
+                x
+            })
             .filter(|x| x.span.contains(&ctx.location))
             .min_by_key(|x| x.span.end - x.span.start)
         {
@@ -131,22 +131,24 @@ impl<'a> CompletionProvider<NsCompletionCtx<'a>> for NamespaceCompletionProvider
                         .collect::<Vec<_>>()
                 );
                 return props
-                    .iter()
+                    .values()
+                    .flatten()
                     .filter(|x| {
-                        info!(
-                            "({}) Checking {} {} -> {}",
-                            ty.contains(&x.domain),
-                            x.property,
-                            handler.class(x.domain).as_str(),
-                            x.range.as_str(handler.deref()),
-                        );
+                        // info!(
+                        //     "({}) Checking {} {} -> {}",
+                        //     ty.contains(&x.domain),
+                        //     x.property,
+                        //     handler.class(x.domain).as_str(),
+                        //     x.range.as_str(handler.deref()),
+                        // );
                         ty.contains(&x.domain)
                     })
                     .flat_map(|x| x.into_completion(&ctx.turtle, range.clone()))
                     .collect();
             } else {
                 return props
-                    .iter()
+                    .values()
+                    .flatten()
                     .flat_map(|x| x.into_completion(&ctx.turtle, range.clone()))
                     .collect();
             }
@@ -154,14 +156,6 @@ impl<'a> CompletionProvider<NsCompletionCtx<'a>> for NamespaceCompletionProvider
             info!("No triple found");
         }
 
-        // let props = self.ontology_states.lock().await;
-
-        // props
-        //     .iter()
-        //     .filter(|(l, _)| l.starts_with(&ctx.prefix_url))
-        //     .flat_map(|(_, xs)| xs.iter())
-        //     .map(|prop: &NamespaceCompletion| prop.into_completion(ctx, range.clone()))
-        //     .collect()
         vec![]
     }
 }
@@ -272,7 +266,7 @@ async fn update_types(url: &str, this: &NamespaceCompletionProvider) {
         }
     }
 
-    for p in props.iter() {
+    for p in props.values().flatten() {
         for mat in state
             .triples
             .quads_matching(Any, [p.property.borrow_term()], Any, Any)
@@ -346,13 +340,15 @@ async fn do_update(turtle: &Turtle, this: &NamespaceCompletionProvider, todo: &m
     }
 
     let mut provider = this.provider.lock().await;
-    let mut props = this.properties.lock().await;
     let mut shape_completion_provider = this.shape_provider.lock().await;
 
+    let mut new_props = vec![];
     let properties = NsPropertyProvider.provide(&state.triples, provider.deref_mut());
-    props.extend(properties);
+    new_props.extend(properties);
     let properties = shape_completion_provider.provide(&state.triples, provider.deref_mut());
-    props.extend(properties);
+    new_props.extend(properties);
+    let mut props = this.properties.lock().await;
+    props.insert(url.clone(), new_props);
 
     let mut props = this.ontology_states.lock().await;
     props.insert(url, state);
