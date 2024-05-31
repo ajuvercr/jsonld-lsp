@@ -456,7 +456,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
             .last_valid
             .get_simple_triples()
             .unwrap_or_default();
-        info!("Calling namespace_completion_provider");
+
         completions.extend(
             self.namespace_completion_provider
                 .find_completions(
@@ -470,8 +470,16 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                 .await,
         );
 
+        info!(
+            "Current type {:?}",
+            current_token_idx
+                .as_ref()
+                .map(|idx| &state.tokens.current[*idx])
+        );
+
         if let Some(token_idx) = current_token_idx {
             if token_idx > 0 {
+                info!("Prev token  {:?}", &state.tokens.current[token_idx - 1]);
                 let ctx = NextTokenCompletionCtx {
                     turtle: &state.element.last_valid,
                     triples: &triples,
