@@ -36,7 +36,7 @@ async fn main() {
     info!("Created prefixes");
 
     let (service, socket) = LspService::build(|client| {
-        Backend::<_, TurtleLang>::new(client, (prefix, Default::default(), Default::default()))
+        Backend::<_, TurtleLang>::new(client, (prefix, Default::default()))
     })
     .finish();
     Server::new(stdin, stdout, socket).serve(service).await;

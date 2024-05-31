@@ -7,7 +7,7 @@ mod parser;
 pub mod shacl;
 mod token;
 pub mod tokenizer;
-use futures::{future::join, FutureExt};
+use futures::FutureExt;
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionResponse, CompletionItemKind,
     DiagnosticSeverity, FormattingOptions, Hover, Position, SemanticTokenType,
@@ -25,7 +25,7 @@ use crate::{
     backend::Client,
     lang::{
         self, head,
-        turtle::completion::{NsCompletionCtx, PropertyCompletionCtx, ShapeCompletionCtx},
+        turtle::completion::{NextTokenCompletionCtx, NsCompletionCtx},
     },
     model::{spanned, Spanned},
     parent::ParentingSystem,
@@ -35,10 +35,7 @@ use crate::{
 };
 
 use self::{
-    completion::{
-        CompletionProvider, NamespaceCompletionProvider, ShapeCompletionProvider,
-        ShapeCompletionProviderState,
-    },
+    completion::{CompletionProvider, NamespaceCompletionProvider},
     formatter::format_turtle,
     node::{Leaf, Node},
     token::Token,
@@ -63,15 +60,10 @@ pub struct TurtleLang {
     defined_prefixes: HashSet<String>,
     prefixes: Prefixes,
     namespace_completion_provider: NamespaceCompletionProvider,
-    shape_completion_provider: ShapeCompletionProvider,
 }
 
 impl Lang for TurtleLang {
-    type State = (
-        Prefixes,
-        NamespaceCompletionProvider,
-        ShapeCompletionProviderState,
-    );
+    type State = (Prefixes, NamespaceCompletionProvider);
 
     type Token = token::Token;
 
@@ -293,7 +285,6 @@ impl Lang for TurtleLang {
                 defined_prefixes: HashSet::new(),
                 prefixes: state.0.clone(),
                 namespace_completion_provider: NamespaceCompletionProvider::new(&state.1),
-                shape_completion_provider: ShapeCompletionProvider::new(&state.2),
             },
             CurrentLangState {
                 element: CurrentLangStatePart::new(spanned(Turtle::empty(&url), 0..1)),
@@ -412,9 +403,8 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
             let turtle = &state.element.current;
             info!("Updating prefixes for {}", self.id);
             let fut1 = self.namespace_completion_provider.update(turtle).await;
-            let fut2 = self.shape_completion_provider.update(turtle).await;
 
-            join(fut1, fut2).map(|_| ()).boxed()
+            fut1.boxed()
         } else {
             async move {}.boxed()
         }
@@ -450,34 +440,29 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
 
         info!("Completion on location {}", location);
 
-        let property_ctx = PropertyCompletionCtx {
-            state,
-            loc: location,
-        };
-
-        let current_token = state
+        let current_token_idx = state
             .tokens
             .current
             .iter()
-            .find(|x| x.1.contains(&location));
+            .position(|x| x.1.contains(&location));
 
-        let range = current_token
+        let range = current_token_idx
             .as_ref()
-            .map(|x| range_to_range(&x.1, &self.rope).unwrap_or_default())
+            .map(|x| range_to_range(&state.tokens.current[*x].1, &self.rope).unwrap_or_default())
             .unwrap_or(lsp_types::Range::new(*position, *position));
 
-        completions.extend(
-            self.shape_completion_provider
-                .find_completions(&property_ctx, range.clone())
-                .await,
-        );
-
+        let triples = state
+            .element
+            .last_valid
+            .get_simple_triples()
+            .unwrap_or_default();
         info!("Calling namespace_completion_provider");
         completions.extend(
             self.namespace_completion_provider
                 .find_completions(
                     &NsCompletionCtx {
                         turtle: &state.element.last_valid,
+                        triples: &triples,
                         location,
                     },
                     range,
@@ -485,7 +470,22 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                 .await,
         );
 
-        if let Some(token) = current_token {
+        if let Some(token_idx) = current_token_idx {
+            if token_idx > 0 {
+                let ctx = NextTokenCompletionCtx {
+                    turtle: &state.element.last_valid,
+                    triples: &triples,
+                    location,
+                    prev_token: &state.tokens.current[token_idx - 1],
+                };
+
+                completions.extend(
+                    self.namespace_completion_provider
+                        .find_completions(&ctx, range)
+                        .await,
+                );
+            }
+            let token = &state.tokens.current[token_idx];
             info!("For token {:?}", token);
             let range = range_to_range(token.span(), &self.rope).unwrap_or_default();
 
@@ -495,40 +495,6 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                         .get_all()
                         .map(|key| self.prefix_to_completion(key, state, range)),
                 );
-            }
-
-            if let Spanned(Token::PNameLN(prefix, _), _) = &token {
-                // Lets find the corresponding prefix thanks
-                let prefix_str = prefix.as_ref().map(|x| x.as_str()).unwrap_or("");
-                let turtle = &state.element.last_valid;
-
-                let m_expanended = if let Some(prefix) = turtle
-                    .prefixes
-                    .iter()
-                    .find(|x| x.prefix.as_str() == prefix_str)
-                {
-                    prefix.value.expand(turtle)
-                } else {
-                    self.prefixes.get(prefix_str).map(String::from)
-                };
-
-                info!("m_expaned {:?}", m_expanended);
-
-                if let Some(expaned) = m_expanended {
-                    let shape_ctx = ShapeCompletionCtx {
-                        state,
-                        loc: location,
-                        prefix_url: &expaned,
-                        prefix: prefix_str,
-                        turtle: &state.element.last_valid,
-                    };
-
-                    completions.extend(
-                        self.shape_completion_provider
-                            .find_completions(&shape_ctx, range.clone())
-                            .await,
-                    );
-                }
             }
         }
 

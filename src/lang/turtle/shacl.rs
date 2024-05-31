@@ -12,7 +12,10 @@ use tracing::info;
 use crate::{lang::SimpleCompletion, model::Spanned};
 use hashbrown::HashSet;
 
-use super::{Base, Turtle};
+use super::{
+    green::{self, ClassProvider},
+    Base, Turtle,
+};
 
 // use super::{Base, Turtle};
 
@@ -377,6 +380,29 @@ impl Shape {
             documentation: Some(description),
             edits,
         })
+    }
+
+    pub fn get_properties(&self, provider: &mut impl ClassProvider) -> Vec<green::Property> {
+        let domain = provider.named(&self.clazz);
+        self.properties
+            .iter()
+            .map(move |prop| {
+                let range = match &prop.ty {
+                    Some(PropertyType::Clazz(class)) => green::Range::Class(provider.named(&class)),
+                    Some(PropertyType::Primitive(primitive)) => {
+                        green::Range::Primitive("Some primitive")
+                    }
+                    None => green::Range::Class(provider.unnamed(None, "shacl")),
+                };
+
+                green::Property {
+                    range,
+                    domain,
+                    property: MyTerm::named_node(&prop.path).to_owned(),
+                    required: prop.min_count.clone().unwrap_or(0) > 0,
+                }
+            })
+            .collect()
     }
 }
 

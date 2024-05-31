@@ -44,7 +44,7 @@ pub trait ClassProvider {
 pub struct BasicClassProvider {
     unnamed_count: usize,
     count_str: String,
-    classes: Vec<Class>,
+    pub classes: Vec<Class>,
 
     pub subclass_dict: Vec<HashSet<usize>>,
     pub superclass_dict: Vec<HashSet<usize>>,
