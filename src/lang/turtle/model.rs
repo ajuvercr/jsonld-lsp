@@ -3,7 +3,7 @@ use sophia_api::term::GraphName;
 use sophia_iri::resolve::{BaseIri, IriParseError};
 
 use super::{
-    shacl::{MyTerm, Triples},
+    shacl::{MyQuad, MyTerm, Triples},
     token::StringStyle,
 };
 use crate::model::Spanned;
@@ -276,7 +276,7 @@ pub struct Turtle {
 
 enum Item<'a> {
     PO(&'a Vec<Spanned<PO>>),
-    This(MyTerm<'a>, Result<&'a Term, MyTerm<'a>>),
+    This(MyTerm<'a>, Result<Spanned<&'a Term>, MyTerm<'a>>),
 }
 impl<'a> From<&'a Vec<Spanned<PO>>> for Item<'a> {
     fn from(value: &'a Vec<Spanned<PO>>) -> Self {
@@ -284,18 +284,40 @@ impl<'a> From<&'a Vec<Spanned<PO>>> for Item<'a> {
     }
 }
 impl<'a> Item<'a> {
-    fn from_pred(pred: &'a str, term: Result<&'a Term, MyTerm<'a>>) -> Self {
+    fn from_pred(pred: &'a str, term: Result<Spanned<&'a Term>, MyTerm<'a>>) -> Self {
         Self::This(MyTerm::named_node(pred), term)
     }
 
+    /// Applies the callback function on all internal nodes
+    ///
+    /// * `turtle` - The entire turtle object
+    /// * `base` - Base used to resolve predicates against
+    /// * `span` - Span of the entire item value
+    /// * `cb` - The callback function
+    ///     * `predicate` - Predicate of the found quad
+    ///     * `term` - Object value of the found quad (either a `Term` or a `MyTerm<'a>`)
+    ///     * `span` - Span of that quad
+    ///
     fn handle(
         self,
         turtle: &Turtle,
         base: &BaseIri<String>,
-        mut cb: impl FnMut(&MyTerm<'a>, Result<&'a Term, MyTerm<'a>>) -> Result<(), TurtleSimpleError>,
+        span: &std::ops::Range<usize>,
+        mut cb: impl FnMut(
+            &MyTerm<'a>,
+            Result<Spanned<&'a Term>, MyTerm<'a>>,
+            &std::ops::Range<usize>,
+        ) -> Result<(), TurtleSimpleError>,
     ) -> Result<(), TurtleSimpleError> {
         match self {
             Item::PO(pos) => {
+                if pos.is_empty() {
+                    cb(
+                        &MyTerm::named_node("TestPredicate"),
+                        Err(MyTerm::named_node("TestObject")),
+                        span,
+                    )?;
+                }
                 for Spanned(PO { predicate, object }, _) in pos.iter() {
                     let predicate = MyTerm::named_node(
                         predicate
@@ -311,12 +333,12 @@ impl<'a> Item<'a> {
                             .map(|x| x.unwrap())?,
                     );
                     for o in object.iter() {
-                        cb(&predicate, Ok(&o))?;
+                        cb(&predicate, Ok(o.as_ref()), span)?;
                     }
                 }
             }
             Item::This(predicate, object) => {
-                cb(&predicate, object)?;
+                cb(&predicate, object, span)?;
             }
         }
         Ok(())
@@ -349,12 +371,12 @@ impl Turtle {
         };
 
         let mut todo = Vec::new();
-        for Spanned(ref triple, _) in &self.triples {
+        for Spanned(ref triple, span) in &self.triples {
             let sub = match triple.subject.value() {
                 Subject::BlankNode(BlankNode::Named(vs)) => MyTerm::blank_node(vs),
                 Subject::BlankNode(BlankNode::Unnamed(vs)) => {
                     let out = blank_node();
-                    todo.push((out.clone(), Item::from(vs)));
+                    todo.push((out.clone(), Item::from(vs), triple.subject.span().clone()));
                     out
                 }
                 Subject::BlankNode(BlankNode::Invalid) => {
@@ -374,13 +396,17 @@ impl Turtle {
                         .map(|x| x.unwrap())?,
                 ),
             };
-            todo.push((sub.clone(), Item::from(&triple.po)));
+            todo.push((sub.clone(), Item::from(&triple.po), span.clone()));
         }
 
-        while let Some((sub, po)) = todo.pop() {
-            let handle = |predicate: &MyTerm<'a>, term: Result<&'a Term, MyTerm<'a>>| {
+        while let Some((sub, po, span)) = todo.pop() {
+            // Handle function will create a quad from a predicate and a term (the subject is
+            // outside th closure)
+            let handle = |predicate: &MyTerm<'a>,
+                          term: Result<Spanned<&'a Term>, MyTerm<'a>>,
+                          span: &std::ops::Range<usize>| {
                 let object = match term {
-                    Ok(Term::NamedNode(nn)) => MyTerm::named_node(
+                    Ok(Spanned(Term::NamedNode(nn), _)) => MyTerm::named_node(
                         nn.expand_step(self, HashSet::new())
                             .ok_or(TurtleSimpleError::UnexpectedBase(
                                 "Expected valid named node for object",
@@ -391,12 +417,14 @@ impl Turtle {
                             })
                             .map(|x| x.unwrap())?,
                     ),
-                    Ok(Term::Literal(literal)) => MyTerm::literal(literal.plain_string()),
-                    Ok(Term::BlankNode(bn)) => match bn {
+                    Ok(Spanned(Term::Literal(literal), _)) => {
+                        MyTerm::literal(literal.plain_string())
+                    }
+                    Ok(Spanned(Term::BlankNode(bn), span)) => match bn {
                         BlankNode::Named(v) => MyTerm::blank_node(v),
                         BlankNode::Unnamed(v) => {
                             let out = blank_node();
-                            todo.push((out.clone(), Item::from(v)));
+                            todo.push((out.clone(), Item::from(v), span));
                             out
                         }
                         BlankNode::Invalid => {
@@ -405,50 +433,64 @@ impl Turtle {
                             ))
                         }
                     },
-                    Ok(Term::Collection(terms)) => {
-                        let mut prev =
-                            MyTerm::named_node("http://www.w3.org/1999/02/22-rdf-syntax-ns#nil");
-
-                        for Spanned(term, _) in terms.iter().rev() {
-                            let next = blank_node();
-
-                            todo.push((
-                                next.clone(),
-                                Item::from_pred(
-                                    "http://www.w3.org/1999/02/22-rdf-syntax-ns#first",
-                                    Ok(term),
-                                ),
-                            ));
-                            todo.push((
-                                next.clone(),
-                                Item::from_pred(
-                                    "http://www.w3.org/1999/02/22-rdf-syntax-ns#rest",
-                                    Err(prev.clone()),
-                                ),
-                            ));
-
-                            prev = next;
-                        }
-
-                        prev
+                    Ok(Spanned(Term::Collection(terms), span)) => {
+                        queue_collection(terms, blank_node, span, &mut todo)
                     }
-                    Ok(Term::Invalid) => {
+                    Ok(Spanned(Term::Invalid, _)) => {
                         return Err(TurtleSimpleError::UnexpectedBase(
                             "Unexpected invalid object",
                         ))
                     }
                     Err(x) => x,
                 };
-                out.push(([sub.clone(), predicate.clone(), object], GraphName::None));
 
+                let quad = MyQuad {
+                    subject: sub.clone(),
+                    predicate: predicate.clone(),
+                    object,
+                    span: span.clone(),
+                };
+                out.push(quad);
                 Ok(())
             };
 
-            po.handle(self, &base, handle)?;
+            po.handle(self, &base, &span, handle)?;
         }
 
         Ok(Triples::new(self, out))
     }
+}
+
+fn queue_collection<'a>(
+    terms: &'a Vec<Spanned<Term>>,
+    mut blank_node: impl FnMut() -> MyTerm<'a>,
+    span: std::ops::Range<usize>,
+    todo: &mut Vec<(MyTerm<'a>, Item<'a>, Range<usize>)>,
+) -> MyTerm<'a> {
+    let mut prev = MyTerm::named_node("http://www.w3.org/1999/02/22-rdf-syntax-ns#nil");
+    for Spanned(term, s) in terms.iter().rev() {
+        let next = blank_node();
+
+        todo.push((
+            next.clone(),
+            Item::from_pred(
+                "http://www.w3.org/1999/02/22-rdf-syntax-ns#first",
+                Ok(Spanned(term, span.clone())),
+            ),
+            s.clone(),
+        ));
+        todo.push((
+            next.clone(),
+            Item::from_pred(
+                "http://www.w3.org/1999/02/22-rdf-syntax-ns#rest",
+                Err(prev.clone()),
+            ),
+            s.clone(),
+        ));
+
+        prev = next;
+    }
+    prev
 }
 
 impl Turtle {

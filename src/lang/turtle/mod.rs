@@ -1,5 +1,6 @@
 mod completion;
 mod formatter;
+mod green;
 mod model;
 mod node;
 mod parser;
@@ -35,8 +36,8 @@ use crate::{
 
 use self::{
     completion::{
-        CompletionProvider, NamespaceCompletionProvider, NamespaceCompletionProviderState,
-        ShapeCompletionProvider, ShapeCompletionProviderState,
+        CompletionProvider, NamespaceCompletionProvider, ShapeCompletionProvider,
+        ShapeCompletionProviderState,
     },
     formatter::format_turtle,
     node::{Leaf, Node},
@@ -68,7 +69,7 @@ pub struct TurtleLang {
 impl Lang for TurtleLang {
     type State = (
         Prefixes,
-        NamespaceCompletionProviderState,
+        NamespaceCompletionProvider,
         ShapeCompletionProviderState,
     );
 
@@ -471,11 +472,24 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                 .await,
         );
 
+        info!("Calling namespace_completion_provider");
+        completions.extend(
+            self.namespace_completion_provider
+                .find_completions(
+                    &NsCompletionCtx {
+                        turtle: &state.element.last_valid,
+                        location,
+                    },
+                    range,
+                )
+                .await,
+        );
+
         if let Some(token) = current_token {
             info!("For token {:?}", token);
-            if let Spanned(Token::Invalid(_), range) = &token {
-                let range = range_to_range(range, &self.rope).unwrap_or_default();
+            let range = range_to_range(token.span(), &self.rope).unwrap_or_default();
 
+            if let Spanned(Token::Invalid(_), _) = &token {
                 completions.extend(
                     self.prefixes
                         .get_all()
@@ -483,9 +497,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                 );
             }
 
-            if let Spanned(Token::PNameLN(prefix, _), range) = &token {
-                let range = range_to_range(range, &self.rope).unwrap_or_default();
-
+            if let Spanned(Token::PNameLN(prefix, _), _) = &token {
                 // Lets find the corresponding prefix thanks
                 let prefix_str = prefix.as_ref().map(|x| x.as_str()).unwrap_or("");
                 let turtle = &state.element.last_valid;
@@ -514,17 +526,6 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                     completions.extend(
                         self.shape_completion_provider
                             .find_completions(&shape_ctx, range.clone())
-                            .await,
-                    );
-                    completions.extend(
-                        self.namespace_completion_provider
-                            .find_completions(
-                                &NsCompletionCtx {
-                                    prefix_url: expaned,
-                                    prefix: prefix_str.to_string(),
-                                },
-                                range,
-                            )
                             .await,
                     );
                 }

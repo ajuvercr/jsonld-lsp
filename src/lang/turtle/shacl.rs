@@ -1,4 +1,4 @@
-use lsp_types::{CompletionItemKind, Documentation, Range};
+use lsp_types::{CompletionItemKind, Range};
 use sophia_api::{
     ns,
     prelude::{Any, Dataset},
@@ -14,9 +14,62 @@ use hashbrown::HashSet;
 
 use super::{Base, Turtle};
 
-pub type MyQuad<'a> = ([MyTerm<'a>; 3], GraphName<MyTerm<'a>>);
+// use super::{Base, Turtle};
 
 #[derive(Debug, Clone)]
+pub struct MyQuad<'a> {
+    pub subject: MyTerm<'a>,
+    pub predicate: MyTerm<'a>,
+    pub object: MyTerm<'a>,
+    pub span: std::ops::Range<usize>,
+}
+impl<'a> std::fmt::Display for MyQuad<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} {} {}. # {:?}",
+            self.subject, self.predicate, self.object, self.span
+        )
+    }
+}
+
+impl<'a> MyQuad<'a> {
+    pub fn to_owned(&self) -> MyQuad<'static> {
+        MyQuad {
+            subject: self.subject.to_owned(),
+            predicate: self.predicate.to_owned(),
+            object: self.object.to_owned(),
+            span: self.span.clone(),
+        }
+    }
+}
+
+impl<'a> Quad for MyQuad<'a> {
+    type Term = MyTerm<'a>;
+
+    fn s(&self) -> sophia_api::quad::QBorrowTerm<Self> {
+        self.subject.borrow_term()
+    }
+
+    fn p(&self) -> sophia_api::quad::QBorrowTerm<Self> {
+        self.predicate.borrow_term()
+    }
+
+    fn o(&self) -> sophia_api::quad::QBorrowTerm<Self> {
+        self.object.borrow_term()
+    }
+
+    fn g(&self) -> GraphName<sophia_api::quad::QBorrowTerm<Self>> {
+        None
+    }
+
+    fn to_spog(self) -> sophia_api::quad::Spog<Self::Term> {
+        ([self.subject, self.predicate, self.object], None)
+    }
+}
+// pub type MyQuad<'a> = ([MyTerm<'a>; 3], GraphName<MyTerm<'a>>);
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct MyTerm<'a> {
     value: Cow<'a, str>,
     ty: TermKind,
@@ -29,6 +82,13 @@ impl<'a> std::fmt::Display for MyTerm<'a> {
 }
 
 impl<'a> MyTerm<'a> {
+    pub fn to_owned(&self) -> MyTerm<'static> {
+        let value = Cow::Owned(self.value.to_string());
+        MyTerm {
+            value,
+            ty: self.ty.clone(),
+        }
+    }
     pub fn named_node<T: Into<Cow<'a, str>>>(value: T) -> Self {
         Self {
             value: value.into(),
@@ -107,7 +167,7 @@ impl<'a> Term for MyTerm<'a> {
 #[derive(Default, Debug)]
 pub struct Triples<'a> {
     pub base_url: String,
-    triples: Vec<MyQuad<'a>>,
+    pub triples: Vec<MyQuad<'a>>,
     base: Option<MyTerm<'a>>,
 }
 
@@ -125,6 +185,17 @@ impl<'a> Triples<'a> {
             triples,
             base,
             base_url,
+        }
+    }
+
+    pub fn to_owned(&self) -> Triples<'static> {
+        let triples = self.triples.iter().map(|q| q.to_owned()).collect();
+        let base: Option<MyTerm<'static>> = self.base.as_ref().map(|x| x.to_owned());
+
+        Triples {
+            base,
+            triples,
+            base_url: self.base_url.clone(),
         }
     }
 
