@@ -360,10 +360,9 @@ pub mod turtle_tests {
     }
 
     #[test]
-    fn parse_triple_with_recovery_no_subject() {
+    fn parse_triple_with_recovery_no_object() {
         let url = lsp_types::Url::from_str("http://example.com/ns#").unwrap();
         let txt = "
-@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 <b> <c>.";
         let (output, errors) = parse_it(txt, turtle(&url));
         println!("Erorrs {:?}", errors);
@@ -372,7 +371,7 @@ pub mod turtle_tests {
         assert_eq!(errors.len(), 1);
         assert_eq!(
             output.unwrap().to_string(),
-            "@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\ninvalid <b> <c>.\n"
+            "invalid <b> <c>.\n"
         );
     }
 
