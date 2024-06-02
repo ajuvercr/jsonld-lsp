@@ -131,9 +131,9 @@ impl ClassProvider for BasicClassProvider {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
 
     use super::*;
+    use hashbrown::HashSet;
 
     #[test]
     fn subclass_works() {

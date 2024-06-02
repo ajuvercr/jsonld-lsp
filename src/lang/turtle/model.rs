@@ -602,7 +602,7 @@ mod test {
         let (output, _) = parse_turtle(txt, &url).expect("Simple");
         let triples = output.get_simple_triples().expect("Triples found");
 
-        assert_eq!(triples.len(), 2);
+        assert_eq!(triples.len(), 3);
         println!("{:?}", triples);
     }
 
@@ -642,7 +642,7 @@ mod test {
 
         let quads: HashSet<String> = a
             .iter()
-            .map(|triple| format!("{} {} {}.", triple.0[0], triple.0[1], triple.0[2]))
+            .map(|triple| format!("{} {} {}.", triple.subject, triple.predicate, triple.object))
             .collect();
 
         let expected_quads: HashSet<String> = "<http://example.com/e> <http://example.com/pred> <internal_bnode_3>.
