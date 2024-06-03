@@ -6,7 +6,7 @@ use sophia_api::{
     quad::Quad,
     term::{matcher::Any, Term},
 };
-use std::{ops::Deref, ops::DerefMut, sync::Arc};
+use std::{ops::DerefMut, sync::Arc};
 use tracing::info;
 
 use crate::{
@@ -137,11 +137,11 @@ impl<'a> CompletionProvider<NsCompletionCtx<'a>> for ArcedNamespaceCompletionPro
         {
             let mut guard = self.inner.lock().await;
             let NamespaceCompletionProvider {
-                ref mut ontology_states,
+                ontology_states: _,
                 ref mut properties,
                 ref mut types,
-                shape_provider,
-                done,
+                shape_provider: _,
+                done: _,
                 ref mut provider,
             } = guard.deref_mut();
             info!("Found triple {}", triple);

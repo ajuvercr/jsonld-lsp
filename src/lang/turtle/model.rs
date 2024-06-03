@@ -225,7 +225,7 @@ impl Term {
     pub fn expand_step<'a>(
         &'a self,
         turtle: &Turtle,
-        mut done: HashSet<&'a str>,
+        done: HashSet<&'a str>,
     ) -> Option<String> {
         self.named_node()?.expand_step(turtle, done)
     }

@@ -16,6 +16,8 @@ pub mod web;
 
 #[cfg(feature = "bin")]
 pub mod bare;
+
+#[allow(unused)]
 #[cfg(feature = "bin")]
 pub use bare::*;
 

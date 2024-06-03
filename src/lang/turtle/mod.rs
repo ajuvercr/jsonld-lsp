@@ -37,9 +37,7 @@ use crate::{
 };
 
 use self::{
-    completion::{
-        ArcedNamespaceCompletionProvider, CompletionProvider, NamespaceCompletionProvider,
-    },
+    completion::{ArcedNamespaceCompletionProvider, CompletionProvider},
     formatter::format_turtle,
     node::{Leaf, Node},
     token::Token,

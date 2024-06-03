@@ -1,5 +1,3 @@
-use std::ops::Range;
-
 use crate::model::spanned;
 use crate::model::Spanned;
 

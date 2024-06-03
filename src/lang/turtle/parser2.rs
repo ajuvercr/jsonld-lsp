@@ -1,4 +1,4 @@
-use chumsky::{prelude::*, Span, Stream};
+use chumsky::prelude::*;
 use tracing::info;
 
 use super::{
@@ -9,38 +9,7 @@ use super::{
 use crate::model::{spanned, Spanned};
 
 type S = std::ops::Range<usize>;
-// #[derive(Debug, Clone, Copy)]
-// struct S {
-//     len: usize,
-//     start: usize,
-//     end: usize,
-// }
-// impl Span for S {
-//     type Context = usize;
-//     type Offset = usize;
-//
-//     fn new(len: Self::Context, range: std::ops::Range<Self::Offset>) -> Self {
-//         Self {
-//             len,
-//             start: range.start,
-//             end: range.end,
-//         }
-//     }
-//
-//     fn context(&self) -> Self::Context {
-//         self.len
-//     }
-//
-//     fn start(&self) -> Self::Offset {
-//         self.len - self.end
-//     }
-//
-//     fn end(&self) -> Self::Offset {
-//         self.len - self.start
-//     }
-// }
 
-// type S = std::ops::Range<usize>;
 #[derive(Clone)]
 pub enum LiteralHelper {
     LangTag(String),
