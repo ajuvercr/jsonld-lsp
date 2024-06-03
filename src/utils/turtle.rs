@@ -1,39 +1,27 @@
 use crate::{
-    lang::turtle::{self, NamedNode, Turtle},
+    lang::turtle::{parse_turtle, tokenizer, Turtle},
     model::spanned,
 };
-use chumsky::{primitive::end, recovery::skip_then_retry_until, Parser};
+use chumsky::Parser;
 use lsp_types::CompletionItemKind;
-use tracing::info;
 
 pub fn parse(str: &str, location: &lsp_types::Url) -> Result<Turtle, String> {
-    let parser = turtle::tokenizer::parse_tokens();
+    let tokens = tokenizer::parse_tokens().parse(str).map_err(|err| {
+        println!("Token error {:?}", err);
+        String::from("Tokenizing failed")
+    })?;
 
-    let tokens = parser
-        .parse(str)
-        .map_err(|_| String::from("Tokenizing failed"))?;
-    info!("{} tokens", tokens.len());
+    let mut comments: Vec<_> = tokens
+        .iter()
+        .filter(|x| x.0.is_comment())
+        .cloned()
+        .map(|x| spanned(x.0.to_comment(), x.1))
+        .collect();
+    comments.sort_by_key(|x| x.1.start);
 
-    let stream = chumsky::Stream::from_iter(
-        0..str.len() + 1,
-        tokens.into_iter().filter(|x| !x.0.is_comment()),
-    );
+    let (turtle, _) = parse_turtle(location, tokens, str.len());
 
-    let parser =
-        turtle::turtle(&location).then_ignore(end().recover_with(skip_then_retry_until([])));
-
-    let (turtle, errors) = parser.parse_recovery(stream);
-    info!(?errors);
-
-    let mut turtle = turtle.ok_or(String::from("Not valid turtle"))?;
-
-    if turtle.base.is_none() {
-        let nn = NamedNode::Full(location.to_string());
-        // iew
-        turtle.base = Some(spanned(turtle::Base(0..1, spanned(nn, 0..1)), 0..1));
-    }
-
-    Ok(turtle)
+    Ok(turtle.into_value())
 }
 
 #[derive(Default, Clone, Copy, Debug)]

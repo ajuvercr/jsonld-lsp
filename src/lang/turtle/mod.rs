@@ -3,8 +3,9 @@ mod formatter;
 mod green;
 mod model;
 mod node;
-mod parser;
+// mod parser;
 mod parser2;
+pub use parser2::parse_turtle;
 pub mod shacl;
 mod token;
 pub mod tokenizer;
@@ -72,7 +73,7 @@ impl Lang for TurtleLang {
 
     type Element = model::Turtle;
 
-    type ElementError = Simple<token::Token>;
+    type ElementError = (usize, Simple<token::Token>);
 
     type RenameError = ();
 
@@ -133,12 +134,7 @@ impl Lang for TurtleLang {
         let parser = tokenizer::parse_tokens();
 
         let (json, errs) = parser.parse_recovery(source);
-
-        let tokens: Vec<_> = json
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(x, y)| spanned(x, y))
-            .collect();
+        let tokens: Vec<_> = json.unwrap_or_default().into_iter().collect();
 
         (tokens, errs)
     }
@@ -158,25 +154,7 @@ impl Lang for TurtleLang {
         comments.sort_by_key(|x| x.1.start);
         self.comments = comments;
 
-        let stream = chumsky::Stream::from_iter(
-            0..source.len() + 1,
-            tokens
-                .into_iter()
-                .rev()
-                .filter(|x| !x.is_comment())
-                .map(|Spanned(x, s)| (x, s)),
-        );
-
-        let parser = turtle(&self.id)
-            .map_with_span(spanned)
-            .then_ignore(end().recover_with(skip_then_retry_until([])));
-
-        let (json, json_errors) = parser.parse_recovery(stream);
-
-        (
-            json.unwrap_or(Spanned(Turtle::empty(&self.id), 0..source.len())),
-            json_errors,
-        )
+        parse_turtle(&self.id, tokens, source.len())
     }
 
     fn code_action(

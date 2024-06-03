@@ -1,5 +1,8 @@
 use std::ops::Range;
 
+use crate::model::spanned;
+use crate::model::Spanned;
+
 use super::token::{StringStyle, Token};
 use chumsky::chain::Chain;
 use chumsky::prelude::*;
@@ -363,9 +366,9 @@ pub fn parse_token() -> t!(Token) {
     .recover_with(skip_parser(invalid()))
 }
 
-pub fn parse_tokens() -> t!(Vec<(Token, Range<usize>)>) {
+pub fn parse_tokens() -> t!(Vec<Spanned<Token>>) {
     parse_token()
-        .map_with_span(|token, span| (token, span))
+        .map_with_span(spanned)
         .padded()
         .repeated()
         .then_ignore(end().recover_with(skip_then_retry_until([])))

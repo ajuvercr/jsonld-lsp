@@ -469,11 +469,18 @@ mod tests {
         inp: &str,
         url: &lsp_types::Url,
     ) -> Result<(Turtle, Vec<Spanned<String>>), Err> {
-        let tokens = tokenizer::parse_tokens().parse(inp).map_err(|err| {
-            println!("Token error {:?}", err);
-            Err::Tokenizing
-        })?;
-        let end = inp.len() - 1..inp.len() + 1;
+        let len = inp.len();
+        let tokens: Vec<_> = tokenizer::parse_tokens()
+            .parse(inp)
+            .map_err(|err| {
+                println!("Token error {:?}", err);
+                Err::Tokenizing
+            })?
+            .into_iter()
+            .rev()
+            .collect();
+
+        let end = 0..inp.len() + 1;
 
         let mut comments: Vec<_> = tokens
             .iter()
@@ -483,7 +490,13 @@ mod tests {
             .collect();
         comments.sort_by_key(|x| x.1.start);
 
-        let stream = Stream::from_iter(end, tokens.into_iter().rev().filter(|x| !x.0.is_comment()));
+        let stream = Stream::from_iter(
+            end,
+            tokens
+                .into_iter()
+                .map(|Spanned(x, span)| (x, (len - span.start)..(len - span.end)))
+                .filter(|x| !x.0.is_comment()),
+        );
 
         turtle(&url)
             .parse(stream)
@@ -491,7 +504,10 @@ mod tests {
                 println!("Parse error {:?}", err);
                 Err::Parsing
             })
-            .map(|t| (t, comments))
+            .map(|mut t| {
+                t.fix_spans(len);
+                (t, comments)
+            })
     }
 
     #[test]

@@ -571,14 +571,14 @@ mod test {
 
     use std::str::FromStr;
 
-    use chumsky::{Parser, Stream};
+    use chumsky::Parser;
     use sophia_api::{
         term::{IriRef, SimpleTerm},
         MownStr,
     };
 
     use crate::{
-        lang::turtle::{parser::turtle, shacl::parse_shape, tokenizer, Turtle},
+        lang::turtle::{parser2, shacl::parse_shape, tokenizer, Turtle},
         model::{spanned, Spanned},
     };
 
@@ -596,8 +596,6 @@ mod test {
             println!("Token error {:?}", err);
             Err::Tokenizing
         })?;
-        let end = inp.len() - 1..inp.len() + 1;
-
         let mut comments: Vec<_> = tokens
             .iter()
             .filter(|x| x.0.is_comment())
@@ -606,15 +604,9 @@ mod test {
             .collect();
         comments.sort_by_key(|x| x.1.start);
 
-        let stream = Stream::from_iter(end, tokens.into_iter().filter(|x| !x.0.is_comment()));
+        let (turtle, _) = parser2::parse_turtle(&url, tokens, inp.len());
 
-        turtle(&url)
-            .parse(stream)
-            .map_err(|err| {
-                println!("Parse error {:?}", err);
-                Err::Parsing
-            })
-            .map(|t| (t, comments))
+        Ok((turtle.into_value(), comments))
     }
 
     #[test]

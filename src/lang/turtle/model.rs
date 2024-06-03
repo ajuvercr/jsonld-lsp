@@ -127,6 +127,24 @@ pub enum BlankNode {
     Invalid,
 }
 
+fn rev_range(range: &std::ops::Range<usize>, len: usize) -> std::ops::Range<usize> {
+    (len - range.end)..(len - range.start)
+}
+
+impl BlankNode {
+    pub fn fix_spans(&mut self, len: usize) {
+        match self {
+            BlankNode::Unnamed(ref mut pos) => {
+                pos.iter_mut().for_each(|span| {
+                    span.1 = rev_range(&span.1, len);
+                    span.0.fix_spans(len);
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
 impl Display for BlankNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -159,6 +177,19 @@ pub enum Term {
 }
 
 impl Term {
+    pub fn fix_spans(&mut self, len: usize) {
+        match self {
+            Term::BlankNode(bn) => bn.fix_spans(len),
+            Term::Collection(pos) => {
+                pos.iter_mut().for_each(|span| {
+                    span.1 = rev_range(&span.1, len);
+                    span.0.fix_spans(len);
+                });
+            }
+            _ => {}
+        }
+    }
+
     pub fn named_node(&self) -> Option<&NamedNode> {
         match self {
             Term::NamedNode(nn) => Some(&nn),
@@ -225,6 +256,18 @@ pub struct Triple {
     pub po: Vec<Spanned<PO>>,
 }
 
+impl Triple {
+    pub fn fix_spans(&mut self, len: usize) {
+        self.subject.1 = rev_range(&self.subject.1, len);
+        self.subject.0.fix_spans(len);
+
+        self.po.iter_mut().for_each(|span| {
+            span.1 = rev_range(&span.1, len);
+            span.0.fix_spans(len);
+        });
+    }
+}
+
 impl Display for Triple {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} {}", self.subject.value(), self.po[0].value())?;
@@ -241,6 +284,17 @@ impl Display for Triple {
 pub struct PO {
     pub predicate: Spanned<Term>,
     pub object: Vec<Spanned<Term>>,
+}
+impl PO {
+    pub fn fix_spans(&mut self, len: usize) {
+        self.predicate.1 = rev_range(&self.predicate.1, len);
+        self.predicate.0.fix_spans(len);
+
+        self.object.iter_mut().for_each(|span| {
+            span.1 = rev_range(&span.1, len);
+            span.0.fix_spans(len);
+        });
+    }
 }
 
 impl Display for PO {
@@ -262,6 +316,11 @@ impl Display for Base {
         write!(f, "@base {} .", self.1.value())
     }
 }
+impl Base {
+    pub fn fix_spans(&mut self, len: usize) {
+        self.1 .1 = rev_range(&self.1 .1, len);
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Prefix {
     pub span: Range<usize>,
@@ -273,6 +332,12 @@ impl Prefix {
         let prefix_url = self.value.expand(turtle)?;
         let short = url.strip_prefix(&prefix_url)?;
         Some(format!("{}:{}", self.prefix.value(), short))
+    }
+
+    pub fn fix_spans(&mut self, len: usize) {
+        self.span = rev_range(&self.span, len);
+        self.prefix.1 = rev_range(&self.prefix.1, len);
+        self.value.1 = rev_range(&self.value.1, len);
     }
 }
 impl Display for Prefix {
@@ -299,6 +364,22 @@ pub struct Turtle {
     pub set_base: lsp_types::Url,
     pub prefixes: Vec<Spanned<Prefix>>,
     pub triples: Vec<Spanned<Triple>>,
+}
+impl Turtle {
+    pub fn fix_spans(&mut self, len: usize) {
+        self.base.iter_mut().for_each(|base| {
+            base.1 = rev_range(&base.1, len);
+            base.0.fix_spans(len);
+        });
+        self.prefixes.iter_mut().for_each(|base| {
+            base.1 = rev_range(&base.1, len);
+            base.0.fix_spans(len);
+        });
+        self.triples.iter_mut().for_each(|base| {
+            base.1 = rev_range(&base.1, len);
+            base.0.fix_spans(len);
+        });
+    }
 }
 
 enum Item<'a> {
@@ -575,10 +656,10 @@ mod test {
 
     use std::{collections::HashSet, str::FromStr};
 
-    use chumsky::{Parser, Stream};
+    use chumsky::{chain::Chain, Parser};
 
     use crate::{
-        lang::turtle::{parser::turtle, shacl::MyQuad, tokenizer, Turtle},
+        lang::turtle::{parser2, shacl::MyQuad, tokenizer, Turtle},
         model::{spanned, Spanned},
     };
 
@@ -606,15 +687,9 @@ mod test {
             .collect();
         comments.sort_by_key(|x| x.1.start);
 
-        let stream = Stream::from_iter(end, tokens.into_iter().filter(|x| !x.0.is_comment()));
+        let (turtle, _) = parser2::parse_turtle(&url, tokens, inp.len());
 
-        turtle(&url)
-            .parse(stream)
-            .map_err(|err| {
-                println!("Parse error {:?}", err);
-                Err::Parsing
-            })
-            .map(|t| (t, comments))
+        Ok((turtle.into_value(), comments))
     }
 
     #[test]
@@ -632,7 +707,7 @@ mod test {
         let (output, _) = parse_turtle(txt, &url).expect("Simple");
         let triples = output.get_simple_triples().expect("Triples found");
 
-        assert_eq!(triples.len(), 3);
+        assert_eq!(triples.triples.len(), 3);
         println!("{:?}", triples);
     }
 
@@ -655,7 +730,7 @@ mod test {
         let (output, _) = parse_turtle(txt, &url).expect("Simple");
         let triples = output.get_simple_triples().expect("Triples found");
 
-        assert_eq!(triples.len(), 6);
+        assert_eq!(triples.triples.len(), 6);
     }
 
     #[test]
@@ -685,6 +760,8 @@ mod test {
 
         assert_eq!(quads, expected_quads);
 
-        assert_eq!(triples.len(), 7);
+        println!("triples {:?}", triples);
+
+        assert_eq!(triples.triples.len(), 7);
     }
 }

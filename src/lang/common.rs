@@ -126,6 +126,43 @@ impl<T: Display + Eq + Hash> From<Simple<T>> for SimpleDiagnostic {
     }
 }
 
+impl<T: Display + Eq + Hash> From<(usize, Simple<T>)> for SimpleDiagnostic {
+    fn from(this: (usize, Simple<T>)) -> Self {
+        let (len, e) = this;
+        let msg = if let chumsky::error::SimpleReason::Custom(msg) = e.reason() {
+            msg.clone()
+        } else {
+            format!(
+                "{}{}, expected {}",
+                if e.found().is_some() {
+                    "Unexpected token"
+                } else {
+                    "Unexpected end of input"
+                },
+                if let Some(label) = e.label() {
+                    format!(" while parsing {}", label)
+                } else {
+                    String::new()
+                },
+                if e.expected().len() == 0 {
+                    "something else".to_string()
+                } else {
+                    e.expected()
+                        .map(|expected| match expected {
+                            Some(expected) => format!("'{}'", expected),
+                            None => "end of input".to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" or ")
+                },
+            )
+        };
+
+        let range = (len - e.span().end)..(len - e.span().start);
+        SimpleDiagnostic::new(range, msg)
+    }
+}
+
 pub trait Token: Sized {
     fn token(&self) -> Option<SemanticTokenType>;
 

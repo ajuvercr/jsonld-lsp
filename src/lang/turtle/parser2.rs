@@ -271,7 +271,6 @@ enum Statement {
     Triple(Spanned<Triple>),
 }
 
-#[allow(unused)]
 pub fn turtle<'a>(
     location: &'a lsp_types::Url,
 ) -> impl Parser<Token, Turtle, Error = Simple<Token>> + 'a {
@@ -305,15 +304,33 @@ pub fn turtle<'a>(
 
 pub fn parse_turtle(
     location: &lsp_types::Url,
-    tokens: Vec<(Token, S)>,
-    end: usize,
-) -> (Option<Turtle>, Vec<Simple<Token>>) {
-    let stream = Stream::from_iter(
-        end..end,
-        tokens.into_iter().rev().filter(|x| !x.0.is_comment()),
+    tokens: Vec<Spanned<Token>>,
+    len: usize,
+) -> (Spanned<Turtle>, Vec<(usize, Simple<Token>)>) {
+    let rev_range = |range: std::ops::Range<usize>| (len - range.end)..(len - range.start);
+    let stream = chumsky::Stream::from_iter(
+        0..len,
+        tokens
+            .into_iter()
+            .rev()
+            .filter(|x| !x.is_comment())
+            .map(|Spanned(x, s)| (x, rev_range(s))),
     );
 
-    turtle(location).parse_recovery(stream)
+    let parser = turtle(location)
+        .map_with_span(spanned)
+        .then_ignore(end().recover_with(skip_then_retry_until([])));
+
+    let (mut json, json_errors) = parser.parse_recovery(stream);
+
+    json.iter_mut().for_each(|turtle| turtle.0.fix_spans(len));
+
+    let json_errors: Vec<_> = json_errors.into_iter().map(|error| (len, error)).collect();
+
+    (
+        json.unwrap_or(Spanned(Turtle::empty(location), 0..len)),
+        json_errors,
+    )
 }
 
 #[cfg(test)]
@@ -322,10 +339,13 @@ pub mod turtle_tests {
 
     use chumsky::{prelude::Simple, Parser, Stream};
 
-    use crate::lang::turtle::{
-        parser2::{blank_node, named_node, prefix, triple, turtle},
-        token::Token,
-        tokenizer, BlankNode,
+    use crate::{
+        lang::turtle::{
+            parser2::{blank_node, named_node, prefix, triple, turtle},
+            token::Token,
+            tokenizer, BlankNode,
+        },
+        model::Spanned,
     };
 
     use super::literal;
@@ -336,7 +356,14 @@ pub mod turtle_tests {
     ) -> (Option<T>, Vec<Simple<Token>>) {
         let tokens = tokenizer::parse_tokens().parse(turtle).unwrap();
         let end = turtle.len()..turtle.len();
-        let stream = Stream::from_iter(end, tokens.into_iter().rev().filter(|x| !x.0.is_comment()));
+        let stream = Stream::from_iter(
+            end,
+            tokens
+                .into_iter()
+                .map(|Spanned(x, y)| (x, y))
+                .rev()
+                .filter(|x| !x.0.is_comment()),
+        );
 
         parser.parse_recovery(stream)
     }
