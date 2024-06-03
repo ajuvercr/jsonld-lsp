@@ -169,6 +169,7 @@ impl<'a> CompletionProvider<NsCompletionCtx<'a>> for ArcedNamespaceCompletionPro
                     .flat_map(|x| x.into_completion(&ctx.turtle, range.clone()))
                     .collect();
             } else {
+                info!("No types found :(");
                 return properties
                     .values()
                     .flatten()
@@ -188,6 +189,7 @@ pub struct NextTokenCompletionCtx<'a> {
     pub location: usize,
     pub triples: &'a Triples<'a>,
     pub prev_token: &'a Token,
+    pub current_token: &'a Token,
 }
 #[async_trait::async_trait]
 impl<'a> CompletionProvider<NextTokenCompletionCtx<'a>> for ArcedNamespaceCompletionProvider {
@@ -198,7 +200,7 @@ impl<'a> CompletionProvider<NextTokenCompletionCtx<'a>> for ArcedNamespaceComple
     ) -> Vec<SimpleCompletion> {
         info!("Next token completion! {:?}", ctx.prev_token);
 
-        if !(*ctx.prev_token == Token::PredType) {
+        if !(*ctx.prev_token == Token::PredType || *ctx.current_token == Token::PredType) {
             return Vec::new();
         }
 
@@ -206,11 +208,11 @@ impl<'a> CompletionProvider<NextTokenCompletionCtx<'a>> for ArcedNamespaceComple
 
         let mut guard = self.inner.lock().await;
         let NamespaceCompletionProvider {
-            ref mut ontology_states,
-            ref mut properties,
+            ontology_states: _,
+            properties: _,
             ref mut types,
             shape_provider,
-            done,
+            done: _,
             ref mut provider,
         } = guard.deref_mut();
 
@@ -249,15 +251,17 @@ impl<'a> CompletionProvider<NextTokenCompletionCtx<'a>> for ArcedNamespaceComple
             );
 
             if let Some(types) = types.get(&triple.subject) {
-                for ty in types {
-                    info!("This might be type {}", provider.class(*ty).as_str())
-                }
+                if types.len() > 1 {
+                    for ty in types {
+                        info!("This might be type {}", provider.class(*ty).as_str())
+                    }
 
-                types
-                    .iter()
-                    .map(|ty| provider.class(*ty).as_str())
-                    .for_each(|class| class_to_completion(class));
-                return out;
+                    types
+                        .iter()
+                        .map(|ty| provider.class(*ty).as_str())
+                        .for_each(|class| class_to_completion(class));
+                    return out;
+                }
             }
         }
 

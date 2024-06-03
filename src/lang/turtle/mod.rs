@@ -442,7 +442,8 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
             .enumerate()
             .filter(|(_, x)| x.span().end > location)
             .min_by_key(|(_, x)| x.span().end)
-            .map(|x| x.0);
+            .map(|x| x.0)
+            .or((!state.tokens.current.is_empty()).then_some(state.tokens.current.len() - 1));
 
         if let Some(idx) = current_token_idx {
             info!("Current token {}", state.tokens.current[idx].value());
@@ -452,8 +453,10 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
         }
 
         let range = current_token_idx
-            .as_ref()
+            .iter()
+            .filter(|&x| state.tokens.current[*x].span().contains(&location))
             .map(|x| range_to_range(&state.tokens.current[*x].1, &self.rope).unwrap_or_default())
+            .next()
             .unwrap_or(lsp_types::Range::new(*position, *position));
 
         let triples = state
@@ -489,6 +492,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
                     triples: &triples,
                     location,
                     prev_token: &state.tokens.current[token_idx - 1],
+                    current_token: &state.tokens.current[token_idx],
                 };
 
                 completions.extend(
@@ -500,7 +504,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
 
             let token = &state.tokens.current[token_idx];
             info!("For token {:?}", token);
-            let range = range_to_range(token.span(), &self.rope).unwrap_or_default();
+            // let range = range_to_range(token.span(), &self.rope).unwrap_or_default();
 
             if let Spanned(Token::Invalid(_), _) = &token {
                 completions.extend(

@@ -167,6 +167,7 @@ fn po(
     term(bn.clone())
         .map_with_span(spanned)
         .separated_by(just(Token::ObjectSplit))
+        .at_least(1)
         .map(|mut x| {
             x.reverse();
             x
@@ -180,8 +181,9 @@ fn po(
 
             let os2 = os.clone();
             // let end = os[0].span().end;
+            //
 
-            let alt_pred = just(Token::PredicateSplit)
+            let alt_pred = one_of([Token::BNodeStart, Token::PredicateSplit])
                 .rewind()
                 .validate(move |_, span: S, emit| {
                     emit(Simple::custom(
