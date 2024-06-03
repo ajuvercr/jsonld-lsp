@@ -5,6 +5,7 @@ use std::{
 
 use lsp_types::FormattingOptions;
 use ropey::Rope;
+use tracing::info;
 
 use crate::model::{spanned, Spanned};
 
@@ -442,7 +443,13 @@ pub fn format_turtle(
 ) -> Option<String> {
     let buf: Buf = Cursor::new(Vec::new());
     let mut state = FormatState::new(config, buf, comments, source);
-    state.write_turtle(turtle).ok()?;
+    match state.write_turtle(turtle) {
+        Ok(_) => info!("Format succesful"),
+        Err(e) => {
+            info!("Format unsuccesful {:?}", e);
+            return None;
+        }
+    }
     String::from_utf8(state.buf.into_inner()).ok()
 }
 

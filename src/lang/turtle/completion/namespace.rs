@@ -250,6 +250,7 @@ async fn update_types(url: &str, this: &NamespaceCompletionProvider) {
     let mut provider = this.provider.lock().await;
     let mut types = this.types.lock().await;
     let props = this.properties.lock().await;
+    types.clear();
 
     for matched in state
         .triples

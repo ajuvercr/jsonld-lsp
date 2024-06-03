@@ -12,12 +12,12 @@ pub mod tokenizer;
 use futures::FutureExt;
 use lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionResponse, CompletionItemKind,
-    DiagnosticSeverity, FormattingOptions, Hover, Position, SemanticTokenType,
+    DiagnosticSeverity, FormattingOptions, Hover, MessageType, Position, SemanticTokenType,
 };
 use std::{collections::HashSet, ops::Range};
 use tracing::info;
 
-use chumsky::{prelude::Simple, primitive::end, recovery::skip_then_retry_until, Parser};
+use chumsky::{prelude::Simple, Parser};
 pub use model::*;
 
 pub use parser2::*;
@@ -111,22 +111,16 @@ impl Lang for TurtleLang {
         state: &CurrentLangState<Self>,
         options: FormattingOptions,
     ) -> Option<String> {
-        let stream = chumsky::Stream::from_iter(
-            0..self.rope.len_chars() + 1,
-            state
-                .tokens
-                .current
-                .iter()
-                .filter(|x| !x.is_comment())
-                .map(|Spanned(x, s)| (x.clone(), s.clone())),
-        );
-
-        let parser = turtle(&self.id)
-            .map_with_span(spanned)
-            .then_ignore(end().recover_with(skip_then_retry_until([])));
-
-        let turtle = parser.parse(stream).ok()?;
-        format_turtle(&turtle.0, options, &self.comments, &self.rope)
+        if state.element.last_is_valid() {
+            format_turtle(
+                &state.element.last_valid,
+                options,
+                &self.comments,
+                &self.rope,
+            )
+        } else {
+            None
+        }
     }
 
     fn tokenize(&mut self, source: &str) -> (Vec<Spanned<Self::Token>>, Vec<Self::TokenError>) {
@@ -379,18 +373,37 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
 
         sender.push_all(undefined_prefixes);
 
-        if state.element.last_is_valid() {
-            let turtle = &state.element.current;
-            info!("Updating prefixes for {}", self.id);
-            let fut1 = self.namespace_completion_provider.update(turtle).await;
+        let turtle = &state.element.current;
+        info!("Updating prefixes for {}", self.id);
+        let fut1 = self.namespace_completion_provider.update(turtle).await;
 
-            fut1.boxed()
-        } else {
-            async move {}.boxed()
-        }
+        fut1.boxed()
     }
 
-    async fn update(&mut self, state: &CurrentLangState<Self>) {
+    async fn update(&mut self, state: &CurrentLangState<Self>, client: &C) {
+        let last_valid_triples = state
+            .element
+            .last_valid
+            .get_simple_triples()
+            .map(|x| format!("last valid {} triples", x.triples.len()))
+            .unwrap_or_else(|e| String::from(format!("Last valid does not have triples {:?}", e)));
+
+        let current_triples = state
+            .element
+            .current
+            .get_simple_triples()
+            .map(|x| format!("current {} triples", x.triples.len()))
+            .unwrap_or_else(|e| String::from(format!("current does not have triples {:?}", e)));
+
+        client
+            .log_message(
+                MessageType::INFO,
+                format!("{} / {}", current_triples, last_valid_triples),
+            )
+            .await;
+
+        info!("{} / {}", current_triples, last_valid_triples);
+
         if state.element.last_is_valid() {
             self.defined_prefixes = HashSet::new();
             for pref in &state.element.current.prefixes {
@@ -448,7 +461,7 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
             self.namespace_completion_provider
                 .find_completions(
                     &NsCompletionCtx {
-                        turtle: &state.element.last_valid,
+                        turtle: &state.element.current,
                         triples: &triples,
                         location,
                     },

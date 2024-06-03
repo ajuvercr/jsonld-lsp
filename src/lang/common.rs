@@ -315,7 +315,7 @@ pub trait LangState<C: Client + Send + Sync + 'static>: Lang
 where
     Self: Sized + Send + Sync,
 {
-    async fn update(&mut self, parents: &CurrentLangState<Self>);
+    async fn update(&mut self, parents: &CurrentLangState<Self>, client: &C);
 
     async fn do_semantic_tokens(&mut self, state: &CurrentLangState<Self>) -> Vec<SemanticToken>;
 
@@ -348,6 +348,7 @@ where
         source: &str,
         state: &mut CurrentLangState<Self>,
         sender: DiagnosticSender,
+        client: &C,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
         let (tokens, token_errors) = self.tokenize(source);
         debug!( token_errors = ?token_errors);
@@ -376,7 +377,7 @@ where
             state.parents.last_valid = parenting.clone();
         }
 
-        self.update(&state).await;
+        self.update(&state, client).await;
 
         sender.push_all(
             token_errors

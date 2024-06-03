@@ -296,6 +296,8 @@ pub fn turtle<'a>(
                     Statement::Triple(t) => triples.push(t),
                 }
             }
+            prefixes.reverse();
+            triples.reverse();
 
             Turtle::new(base, prefixes, triples, location)
         })

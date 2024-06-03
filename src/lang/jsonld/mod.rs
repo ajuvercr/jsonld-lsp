@@ -255,8 +255,8 @@ impl Lang for JsonLd {
 
 #[async_trait::async_trait]
 impl<C: Client + Send + Sync + 'static> LangState<C> for JsonLd {
-    #[tracing::instrument(skip(self, state), fields(id=self.id))]
-    async fn update(&mut self, state: &CurrentLangState<Self>) {
+    #[tracing::instrument(skip(self, state, _client), fields(id=self.id))]
+    async fn update(&mut self, state: &CurrentLangState<Self>, _client: &C) {
         debug!("update parents");
 
         if state.parents.last_is_valid() {

@@ -411,7 +411,7 @@ impl<C: Client + Send + Sync + 'static, L: LangState<C> + Send + Sync> Backend<C
             rope.clone(),
         );
 
-        let fut = lang.update_text(&params.text, state, sender).await;
+        let fut = lang.update_text(&params.text, state, sender, &self.client).await;
         self.client.spawn(join(fut, publisher.spawn()));
 
         {
