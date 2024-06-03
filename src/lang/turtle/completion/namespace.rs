@@ -173,73 +173,77 @@ impl<'a> CompletionProvider<NextTokenCompletionCtx<'a>> for NamespaceCompletionP
         ctx: &NextTokenCompletionCtx,
         range: Range,
     ) -> Vec<SimpleCompletion> {
+        info!("Next token completion! {:?}", ctx.prev_token);
+
+        if !(*ctx.prev_token == Token::PredType) {
+            return Vec::new();
+        }
+
         let triples = &ctx.triples;
 
-        if *ctx.prev_token == Token::PredType {
-            let prov = self.provider.lock().await;
-            let types = self.types.lock().await;
-            let shape_provider = self.shape_provider.lock().await;
+        let prov = self.provider.lock().await;
+        let types = self.types.lock().await;
+        let shape_provider = self.shape_provider.lock().await;
 
-            let mut out = Vec::new();
+        let mut out = Vec::new();
 
-            let mut class_to_completion = |class: &str| {
-                if let Some(property) = ctx.turtle.shorten(class) {
-                    let edits = vec![lsp_types::TextEdit {
-                        new_text: property.clone(),
-                        range: range.clone(),
-                    }];
+        let mut class_to_completion = |class: &str| {
+            if let Some(property) = ctx.turtle.shorten(class) {
+                let edits = vec![lsp_types::TextEdit {
+                    new_text: property.clone(),
+                    range: range.clone(),
+                }];
 
-                    out.push(SimpleCompletion {
-                        kind: CompletionItemKind::CLASS,
-                        label: property,
-                        filter_text: None,
-                        sort_text: None,
-                        documentation: None,
-                        edits,
-                    });
-                }
-
-                shape_provider.find_snippets(class, &ctx.turtle, range.clone(), &mut out);
-            };
-
-            if let Some(triple) = triples
-                .triples
-                .iter()
-                .filter(|x| x.span.contains(&ctx.location))
-                .min_by_key(|x| x.span.end - x.span.start)
-            {
-                info!(
-                    "Found subject {} with types {}",
-                    triple.subject,
-                    types.get(&triple.subject).is_some()
-                );
-
-                if let Some(types) = types.get(&triple.subject) {
-                    for ty in types {
-                        info!("This might be type {}", prov.class(*ty).as_str())
-                    }
-
-                    types
-                        .iter()
-                        .map(|ty| prov.class(*ty).as_str())
-                        .for_each(|class| class_to_completion(class));
-                    return out;
-                }
+                out.push(SimpleCompletion {
+                    kind: CompletionItemKind::CLASS,
+                    label: property,
+                    filter_text: None,
+                    sort_text: None,
+                    documentation: None,
+                    edits,
+                });
             }
 
-            prov.classes
-                .iter()
-                .flat_map(|x| {
-                    if let Class::Named(x) = x {
-                        Some(x)
-                    } else {
-                        None
-                    }
-                })
-                .for_each(|class| class_to_completion(class));
-            return out;
+            shape_provider.find_snippets(class, &ctx.turtle, range.clone(), &mut out);
+        };
+
+        if let Some(triple) = triples
+            .triples
+            .iter()
+            .filter(|x| x.span.contains(&ctx.location))
+            .min_by_key(|x| x.span.end - x.span.start)
+        {
+            info!(
+                "Found subject {} with types {}",
+                triple.subject,
+                types.get(&triple.subject).is_some()
+            );
+
+            if let Some(types) = types.get(&triple.subject) {
+                for ty in types {
+                    info!("This might be type {}", prov.class(*ty).as_str())
+                }
+
+                types
+                    .iter()
+                    .map(|ty| prov.class(*ty).as_str())
+                    .for_each(|class| class_to_completion(class));
+                return out;
+            }
         }
-        vec![]
+
+        prov.classes
+            .iter()
+            .flat_map(|x| {
+                if let Class::Named(x) = x {
+                    Some(x)
+                } else {
+                    None
+                }
+            })
+            .for_each(|class| class_to_completion(class));
+
+        out
     }
 }
 

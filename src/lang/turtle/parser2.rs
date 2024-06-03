@@ -1,4 +1,5 @@
 use chumsky::{prelude::*, Span, Stream};
+use tracing::info;
 
 use super::{
     token::{StringStyle, Token},
@@ -156,7 +157,7 @@ fn term(
         let blank = bn.map(|x| Term::BlankNode(x));
         let literal = literal().map(|x| Term::Literal(x));
 
-        collection.or(nn).or(blank).or(literal)
+        collection.or(literal).or(nn).or(blank)
     })
 }
 
@@ -328,6 +329,12 @@ pub fn parse_turtle(
     json.iter_mut().for_each(|turtle| turtle.0.fix_spans(len));
 
     let json_errors: Vec<_> = json_errors.into_iter().map(|error| (len, error)).collect();
+    if !json_errors.is_empty() {
+        info!("Errors");
+        for e in &json_errors {
+            info!("Error {:?}", e);
+        }
+    }
 
     (
         json.unwrap_or(Spanned(Turtle::empty(location), 0..len)),

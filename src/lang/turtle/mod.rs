@@ -437,7 +437,10 @@ impl<C: Client + Send + Sync + 'static> LangState<C> for TurtleLang {
             .tokens
             .current
             .iter()
-            .position(|x| x.1.contains(&location));
+            .enumerate()
+            .filter(|(_, x)| x.span().end > location)
+            .min_by_key(|(_, x)| x.span().end)
+            .map(|x| x.0);
 
         if let Some(idx) = current_token_idx {
             info!("Current token {}", state.tokens.current[idx].value());
