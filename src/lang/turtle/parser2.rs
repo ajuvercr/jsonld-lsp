@@ -1,13 +1,45 @@
-use chumsky::prelude::*;
+use chumsky::{prelude::*, Span, Stream};
 
 use super::{
     token::{StringStyle, Token},
-    Base, BlankNode, Literal, NamedNode, Prefix, RDFLiteral, Subject, Term, Triple, Turtle, PO,
+    Base, BlankNode, Literal, NamedNode, Prefix, RDFLiteral, Term, Triple, Turtle, PO,
 };
 
 use crate::model::{spanned, Spanned};
 
 type S = std::ops::Range<usize>;
+// #[derive(Debug, Clone, Copy)]
+// struct S {
+//     len: usize,
+//     start: usize,
+//     end: usize,
+// }
+// impl Span for S {
+//     type Context = usize;
+//     type Offset = usize;
+//
+//     fn new(len: Self::Context, range: std::ops::Range<Self::Offset>) -> Self {
+//         Self {
+//             len,
+//             start: range.start,
+//             end: range.end,
+//         }
+//     }
+//
+//     fn context(&self) -> Self::Context {
+//         self.len
+//     }
+//
+//     fn start(&self) -> Self::Offset {
+//         self.len - self.end
+//     }
+//
+//     fn end(&self) -> Self::Offset {
+//         self.len - self.start
+//     }
+// }
+
+// type S = std::ops::Range<usize>;
 #[derive(Clone)]
 pub enum LiteralHelper {
     LangTag(String),
@@ -40,7 +72,7 @@ impl LiteralHelper {
     }
 }
 
-fn literal() -> impl Parser<Token, Literal, Error = Simple<Token>> + Clone {
+fn literal() -> impl Parser<Token, Literal, Error = Simple<Token, S>> + Clone {
     let lt = select! { Token::LangTag(x) => LiteralHelper::LangTag(x)};
 
     let dt = named_node()
@@ -61,7 +93,7 @@ fn literal() -> impl Parser<Token, Literal, Error = Simple<Token>> + Clone {
         })
 }
 
-fn named_node() -> impl Parser<Token, NamedNode, Error = Simple<Token>> + Clone {
+fn named_node() -> impl Parser<Token, NamedNode, Error = Simple<Token, S>> + Clone {
     select! {
         Token::PredType => NamedNode::A,
         Token::IRIRef(x) => NamedNode::Full(x),
@@ -69,7 +101,7 @@ fn named_node() -> impl Parser<Token, NamedNode, Error = Simple<Token>> + Clone 
     }
 }
 
-fn expect_token(token: Token) -> impl Parser<Token, Token, Error = Simple<Token>> + Clone {
+fn expect_token(token: Token) -> impl Parser<Token, Token, Error = Simple<Token, S>> + Clone {
     just(token.clone()).or(none_of([token.clone()])
         .rewind()
         .validate(move |_, span: S, emit| {
@@ -80,7 +112,6 @@ fn expect_token(token: Token) -> impl Parser<Token, Token, Error = Simple<Token>
             ));
             token.clone()
         }))
-    // just(token.clone())
 }
 
 fn blank_node() -> impl Parser<Token, BlankNode, Error = Simple<Token>> + Clone {
@@ -101,10 +132,10 @@ fn blank_node() -> impl Parser<Token, BlankNode, Error = Simple<Token>> + Clone 
     })
 }
 
-fn subject() -> impl Parser<Token, Subject, Error = Simple<Token>> + Clone {
+fn subject() -> impl Parser<Token, Term, Error = Simple<Token, S>> + Clone {
     named_node()
-        .map(|x| Subject::NamedNode(x))
-        .or(blank_node().map(|x| Subject::BlankNode(x)))
+        .map(|x| Term::NamedNode(x))
+        .or(blank_node().map(|x| Term::BlankNode(x)))
 }
 
 fn term(
@@ -114,6 +145,10 @@ fn term(
         let collection = term
             .map_with_span(spanned)
             .repeated()
+            .map(|mut x| {
+                x.reverse();
+                x
+            })
             .delimited_by(just(Token::ColEnd), just(Token::ColStart))
             .map(|x| Term::Collection(x));
 
@@ -128,7 +163,7 @@ fn term(
 fn po(
     bn: impl Clone + Parser<Token, BlankNode, Error = Simple<Token>> + 'static,
 ) -> impl Parser<Token, PO, Error = Simple<Token>> + Clone {
-    term(bn)
+    term(bn.clone())
         .map_with_span(spanned)
         .separated_by(just(Token::ObjectSplit))
         .map(|mut x| {
@@ -136,36 +171,77 @@ fn po(
             x
         })
         // .allow_leading() // TODO check in grammar
-        .then(
-            named_node().map_with_span(spanned), //  HERE
-        )
+        .then_with(move |os| {
+            let os1 = os.clone();
+            let predicate = term(bn.clone())
+                .map_with_span(spanned)
+                .map(move |pred| (os1.clone(), pred));
+
+            let os2 = os.clone();
+            // let end = os[0].span().end;
+
+            let alt_pred = just(Token::PredicateSplit)
+                .rewind()
+                .validate(move |_, span: S, emit| {
+                    emit(Simple::custom(
+                        span.end..span.end,
+                        format!("Expected an object."),
+                    ));
+                    ()
+                })
+                .map(move |_| {
+                    let mut os = os2.clone();
+                    let pred = os[0].clone();
+                    os[0] = spanned(Term::NamedNode(NamedNode::Invalid), os[0].span().clone());
+
+                    (os, pred)
+                });
+
+            predicate.or(alt_pred)
+        })
         .map(|(object, predicate)| PO { predicate, object })
 }
 
 fn triple() -> impl Parser<Token, Triple, Error = Simple<Token>> + Clone {
-    let subj = subject().or(empty().validate(|_, span: S, emit| {
-        emit(Simple::custom(
-            span.end..span.end,
-            format!("Expected a subject."),
-        ));
-        Subject::NamedNode(NamedNode::Invalid)
-    }));
-    // let subj = subject();
-
     expect_token(Token::Stop)
         .ignore_then(
             po(blank_node())
                 .map_with_span(spanned)
                 .separated_by(just(Token::PredicateSplit))
                 .allow_leading()
+                .at_least(1)
                 .map(|mut x| {
                     x.reverse();
                     x
                 }),
         )
-        .then(
-            subj.map_with_span(spanned), // HERE
-        )
+        .then_with(move |po| {
+            let po2 = po.clone();
+            let basic_subj = subject()
+                .map_with_span(spanned)
+                .map(move |subj| (po2.clone(), subj));
+
+            let end = po[0].span().end;
+            let alt_subj = empty().validate(move |_, _: S, emit| {
+                emit(Simple::custom(end..end, format!("Expected a predicate.")));
+
+                let mut po = po.clone();
+                let first = po[0].value_mut();
+
+                let subj = first.predicate.clone();
+                first.predicate = first.object.pop().unwrap();
+
+                first.object.push(Spanned(
+                    Term::NamedNode(NamedNode::Invalid),
+                    first.predicate.span().clone(),
+                ));
+
+                // Subject::NamedNode(NamedNode::Invalid)
+                (po, subj)
+            });
+
+            basic_subj.or(alt_subj)
+        })
         .map(|(po, subject)| Triple { subject, po })
 }
 
@@ -225,6 +301,19 @@ pub fn turtle<'a>(
             Turtle::new(base, prefixes, triples, location)
         })
         .then_ignore(end())
+}
+
+pub fn parse_turtle(
+    location: &lsp_types::Url,
+    tokens: Vec<(Token, S)>,
+    end: usize,
+) -> (Option<Turtle>, Vec<Simple<Token>>) {
+    let stream = Stream::from_iter(
+        end..end,
+        tokens.into_iter().rev().filter(|x| !x.0.is_comment()),
+    );
+
+    turtle(location).parse_recovery(stream)
 }
 
 #[cfg(test)]
@@ -362,17 +451,27 @@ pub mod turtle_tests {
     #[test]
     fn parse_triple_with_recovery_no_object() {
         let url = lsp_types::Url::from_str("http://example.com/ns#").unwrap();
-        let txt = "
-<b> <c>.";
+        let txt = "<b> <c> .";
         let (output, errors) = parse_it(txt, turtle(&url));
-        println!("Erorrs {:?}", errors);
-        println!("Outpput {:?}", output);
+
+        println!("output {:?}", output);
+        println!("errors {:?}", errors);
 
         assert_eq!(errors.len(), 1);
-        assert_eq!(
-            output.unwrap().to_string(),
-            "invalid <b> <c>.\n"
-        );
+        assert_eq!(output.unwrap().to_string(), "<b> <c> invalid.\n");
+    }
+
+    #[test]
+    fn parse_triple_with_recovery_unfinished_object() {
+        let url = lsp_types::Url::from_str("http://example.com/ns#").unwrap();
+        let txt = "<a> <b> <c>; <d> .";
+        let (output, errors) = parse_it(txt, turtle(&url));
+
+        println!("output {:?}", output);
+        println!("errors {:?}", errors);
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(output.unwrap().to_string(), "<a> <b> <c>; <d> invalid.\n");
     }
 
     #[test]

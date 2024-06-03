@@ -19,7 +19,7 @@ use tracing::info;
 use chumsky::{prelude::Simple, primitive::end, recovery::skip_then_retry_until, Parser};
 pub use model::*;
 
-pub use parser::*;
+pub use parser2::*;
 use ropey::Rope;
 
 use crate::{
@@ -162,6 +162,7 @@ impl Lang for TurtleLang {
             0..source.len() + 1,
             tokens
                 .into_iter()
+                .rev()
                 .filter(|x| !x.is_comment())
                 .map(|Spanned(x, s)| (x, s)),
         );

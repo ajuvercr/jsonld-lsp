@@ -1,5 +1,4 @@
 use hashbrown::HashSet;
-use sophia_api::term::GraphName;
 use sophia_iri::resolve::{BaseIri, IriParseError};
 
 use super::{
@@ -151,27 +150,54 @@ impl Display for BlankNode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Subject {
-    BlankNode(BlankNode),
-    NamedNode(NamedNode),
-}
-
-impl Display for Subject {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Subject::BlankNode(b) => b.fmt(f),
-            Subject::NamedNode(n) => n.fmt(f),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Term {
     Literal(Literal),
     BlankNode(BlankNode),
     NamedNode(NamedNode),
     Collection(Vec<Spanned<Term>>),
     Invalid,
+}
+
+impl Term {
+    pub fn named_node(&self) -> Option<&NamedNode> {
+        match self {
+            Term::NamedNode(nn) => Some(&nn),
+            _ => None,
+        }
+    }
+
+    pub fn is_subject(&self) -> bool {
+        match self {
+            Term::BlankNode(_) => true,
+            Term::NamedNode(_) => true,
+            _ => false,
+        }
+    }
+    pub fn is_predicate(&self) -> bool {
+        match self {
+            Term::NamedNode(_) => true,
+            _ => false,
+        }
+    }
+    pub fn ty(&self) -> &'static str {
+        match self {
+            Term::Literal(_) => "literal",
+            Term::BlankNode(_) => "blank node",
+            Term::NamedNode(_) => "named node",
+            Term::Collection(_) => "collection",
+            Term::Invalid => "invalid",
+        }
+    }
+    pub fn expand(&self, turtle: &Turtle) -> Option<String> {
+        self.named_node()?.expand(turtle)
+    }
+    pub fn expand_step<'a>(
+        &'a self,
+        turtle: &Turtle,
+        mut done: HashSet<&'a str>,
+    ) -> Option<String> {
+        self.named_node()?.expand_step(turtle, done)
+    }
 }
 
 impl Display for Term {
@@ -195,7 +221,7 @@ impl Display for Term {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Triple {
-    pub subject: Spanned<Subject>,
+    pub subject: Spanned<Term>,
     pub po: Vec<Spanned<PO>>,
 }
 
@@ -213,7 +239,7 @@ impl Display for Triple {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PO {
-    pub predicate: Spanned<NamedNode>,
+    pub predicate: Spanned<Term>,
     pub object: Vec<Spanned<Term>>,
 }
 
@@ -264,6 +290,7 @@ impl Display for Prefix {
 pub enum TurtleSimpleError {
     Parse(IriParseError),
     UnexpectedBase(&'static str),
+    UnexpectedBaseString(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -373,18 +400,14 @@ impl Turtle {
         let mut todo = Vec::new();
         for Spanned(ref triple, span) in &self.triples {
             let sub = match triple.subject.value() {
-                Subject::BlankNode(BlankNode::Named(vs)) => MyTerm::blank_node(vs),
-                Subject::BlankNode(BlankNode::Unnamed(vs)) => {
+                Term::BlankNode(BlankNode::Named(vs)) => MyTerm::blank_node(vs),
+                Term::BlankNode(BlankNode::Unnamed(vs)) => {
                     let out = blank_node();
                     todo.push((out.clone(), Item::from(vs), triple.subject.span().clone()));
                     out
                 }
-                Subject::BlankNode(BlankNode::Invalid) => {
-                    return Err(TurtleSimpleError::UnexpectedBase(
-                        "Unexpected invalid blank node",
-                    ))
-                }
-                Subject::NamedNode(nn) => MyTerm::named_node(
+
+                Term::NamedNode(nn) => MyTerm::named_node(
                     nn.expand_step(self, HashSet::new())
                         .ok_or(TurtleSimpleError::UnexpectedBase(
                             "Expected valid named node for object",
@@ -395,6 +418,13 @@ impl Turtle {
                         })
                         .map(|x| x.unwrap())?,
                 ),
+
+                x => {
+                    return Err(TurtleSimpleError::UnexpectedBaseString(format!(
+                        "Unexpected {}",
+                        x.ty()
+                    )))
+                }
             };
             todo.push((sub.clone(), Item::from(&triple.po), span.clone()));
         }

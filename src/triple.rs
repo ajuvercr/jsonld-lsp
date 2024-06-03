@@ -6,13 +6,13 @@ pub struct Triple {
     pub object: String,
 }
 
-pub fn extract_triples(turtle: &Turtle) -> Vec<Triple> {
+pub fn extract_triples<S>(turtle: &Turtle) -> Vec<Triple> {
     let mut triples: Vec<Triple> = Vec::new();
 
     for triple in &turtle.triples {
         let subject = match &triple.subject.0 {
-            turtle::Subject::BlankNode(BlankNode::Named(x)) => x.clone(),
-            turtle::Subject::NamedNode(n) => {
+            turtle::Term::BlankNode(BlankNode::Named(x)) => x.clone(),
+            turtle::Term::NamedNode(n) => {
                 if let Some(x) = n.expand(&turtle) {
                     // info!("subject {:?} -> {}", n, x);
                     x

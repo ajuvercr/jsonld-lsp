@@ -192,6 +192,7 @@ impl<'a> FormatState<'a> {
     }
 
     fn check_comments(&mut self, span: &Range<usize>) -> io::Result<bool> {
+        println!("Checking comments with span {:?}", span);
         let mut first = true;
         loop {
             let current = self.comments.get(self.comments_idx).unwrap_or(&self.tail);
@@ -261,12 +262,15 @@ impl FormatState<'_> {
 
         Ok(())
     }
+
     fn write_prefix(&mut self, prefix: &Prefix) -> io::Result<()> {
         write!(self.buf, "@prefix {}: {}.", prefix.prefix.0, prefix.value.0)
     }
+
     fn write_base(&mut self, base: &Base) -> io::Result<()> {
         write!(self.buf, "@base {}.", base.1 .0)
     }
+
     fn write_bnode(&mut self, bnode: &BlankNode) -> io::Result<()> {
         match bnode {
             BlankNode::Named(x) => write!(self.buf, "_:{}", x)?,
@@ -394,8 +398,9 @@ impl FormatState<'_> {
 
     fn write_triple(&mut self, triple: &Triple) -> io::Result<()> {
         match &triple.subject.0 {
-            super::Subject::BlankNode(bn) => self.write_bnode(bn)?,
-            super::Subject::NamedNode(n) => write!(self.buf, "{}", n)?,
+            super::Term::BlankNode(bn) => self.write_bnode(bn)?,
+            super::Term::NamedNode(n) => write!(self.buf, "{}", n)?,
+            _ => write!(self.buf, "invalid")?,
         }
         write!(self.buf, " ")?;
         self.write_po(&triple.po[0])?;
@@ -450,7 +455,7 @@ mod tests {
     use ropey::Rope;
 
     use crate::{
-        lang::turtle::{formatter::format_turtle, parser::turtle, tokenizer, Turtle},
+        lang::turtle::{formatter::format_turtle, parser2::turtle, tokenizer, Turtle},
         model::{spanned, Spanned},
     };
 
@@ -478,7 +483,7 @@ mod tests {
             .collect();
         comments.sort_by_key(|x| x.1.start);
 
-        let stream = Stream::from_iter(end, tokens.into_iter().filter(|x| !x.0.is_comment()));
+        let stream = Stream::from_iter(end, tokens.into_iter().rev().filter(|x| !x.0.is_comment()));
 
         turtle(&url)
             .parse(stream)

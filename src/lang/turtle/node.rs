@@ -4,7 +4,7 @@ use common::Token;
 use enum_methods::{EnumIntoGetters, EnumIsA, EnumToGetters};
 use lsp_types::SemanticTokenType;
 
-use super::{Base, BlankNode, Literal, NamedNode, Prefix, Subject, Term, Triple, Turtle};
+use super::{Base, BlankNode, Literal, NamedNode, Prefix, Term, Triple, Turtle};
 use crate::{
     lang::common,
     model::{spanned, Spanned},
@@ -185,8 +185,9 @@ impl ParentingSystem<Spanned<Node>> {
     ) -> usize {
         let element = self.increment(parent);
         let subject = match subject.0 {
-            Subject::BlankNode(b) => self.add_bnode(Spanned(b, subject.1), element),
-            Subject::NamedNode(n) => self.add_leaf(Spanned(n, subject.1), element),
+            Term::BlankNode(b) => self.add_bnode(Spanned(b, subject.1), element),
+            Term::NamedNode(n) => self.add_leaf(Spanned(n, subject.1), element),
+            _ => self.add_leaf(Spanned(NamedNode::Invalid, subject.1), element),
         };
 
         let po = self.extract_po(po, element);
@@ -198,7 +199,11 @@ impl ParentingSystem<Spanned<Node>> {
     fn extract_po(&mut self, po: Vec<Spanned<super::model::PO>>, parent: usize) -> Vec<PO> {
         let mut children = Vec::new();
         for Spanned(p, __) in po {
-            let nn = self.add_leaf(p.predicate, parent);
+            let nn = self.add_leaf(
+                p.predicate
+                    .map(|x| x.named_node().unwrap_or(&NamedNode::Invalid).clone()),
+                parent,
+            );
             let objects = p
                 .object
                 .into_iter()

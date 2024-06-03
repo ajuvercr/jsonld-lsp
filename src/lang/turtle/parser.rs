@@ -2,7 +2,7 @@ use chumsky::prelude::*;
 
 use super::{
     token::{StringStyle, Token},
-    Base, BlankNode, Literal, NamedNode, Prefix, RDFLiteral, Subject, Term, Triple, Turtle, PO,
+    Base, BlankNode, Literal, NamedNode, Prefix, RDFLiteral, Term, Triple, Turtle, PO,
 };
 
 use crate::model::{spanned, Spanned};
@@ -81,12 +81,6 @@ fn blank_node() -> impl Parser<Token, BlankNode, Error = Simple<Token>> + Clone 
     })
 }
 
-fn subject() -> impl Parser<Token, Subject, Error = Simple<Token>> + Clone {
-    named_node()
-        .map(|x| Subject::NamedNode(x))
-        .or(blank_node().map(|x| Subject::BlankNode(x)))
-}
-
 fn term(
     bn: impl Clone + Parser<Token, BlankNode, Error = Simple<Token>> + 'static,
 ) -> impl Parser<Token, Term, Error = Simple<Token>> + Clone {
@@ -105,7 +99,16 @@ fn term(
 fn po(
     bn: impl Clone + Parser<Token, BlankNode, Error = Simple<Token>> + 'static,
 ) -> impl Parser<Token, PO, Error = Simple<Token>> + Clone {
-    named_node()
+    term(bn.clone())
+        .validate(|x, span, emit| {
+            if !x.is_predicate() {
+                emit(Simple::custom(
+                    span,
+                    format!("Unexpected {}, expected predicate", x.ty()),
+                ));
+            }
+            x
+        })
         .map_with_span(spanned)
         .then(
             term(bn)
@@ -116,7 +119,16 @@ fn po(
 }
 
 fn triple() -> impl Parser<Token, Triple, Error = Simple<Token>> + Clone {
-    subject()
+    term(blank_node())
+        .validate(|x, span, emit| {
+            if !x.is_subject() {
+                emit(Simple::custom(
+                    span,
+                    format!("Unexpected {}, expected subject", x.ty()),
+                ));
+            }
+            x
+        })
         .map_with_span(spanned)
         .then(
             po(blank_node())
