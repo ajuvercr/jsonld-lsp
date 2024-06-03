@@ -40,33 +40,48 @@ impl NamespaceState {
         Self { triples }
     }
 }
-#[derive(Clone, Default)]
-pub struct NamespaceCompletionProvider {
-    ontology_states: Arc<Mutex<HashMap<String, NamespaceState>>>,
-    properties: Arc<Mutex<HashMap<String, Vec<Property>>>>,
-    provider: Arc<Mutex<BasicClassProvider>>,
-    types: Arc<Mutex<HashMap<MyTerm<'static>, HashSet<usize>>>>,
 
-    shape_provider: Arc<Mutex<ShapeCompletionProvider>>,
-    done: Arc<Mutex<HashSet<String>>>,
+#[derive(Clone, Default)]
+pub struct ArcedNamespaceCompletionProvider {
+    inner: Arc<Mutex<NamespaceCompletionProvider>>,
 }
-impl NamespaceCompletionProvider {
+impl ArcedNamespaceCompletionProvider {
     pub fn new(state: &Self) -> Self {
         state.clone()
     }
+}
 
+#[derive(Default)]
+pub struct NamespaceCompletionProvider {
+    ontology_states: HashMap<String, NamespaceState>,
+    properties: HashMap<String, Vec<Property>>,
+    types: HashMap<MyTerm<'static>, HashSet<usize>>,
+    shape_provider: ShapeCompletionProvider,
+    done: HashSet<String>,
+    provider: BasicClassProvider,
+}
+
+impl ArcedNamespaceCompletionProvider {
     pub async fn update(
         &self,
         turtle: &Turtle,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
         // Add todo vec etc, add owl:imports
         let mut prefixes: Vec<_> = {
-            let props = self.ontology_states.lock().await;
+            let mut guard = self.inner.lock().await;
+            let props = &mut guard.done;
             turtle
                 .prefixes
                 .iter()
                 .flat_map(|x| x.value.expand(turtle))
-                .filter(|x| !props.contains_key(x))
+                .flat_map(|x| {
+                    if !props.contains(&x) {
+                        props.insert(x.clone());
+                        Some(x)
+                    } else {
+                        None
+                    }
+                })
                 .collect()
         };
 
@@ -87,8 +102,10 @@ impl NamespaceCompletionProvider {
                     }
                 }
 
-                let mut props = this.ontology_states.lock().await;
-                props.insert(prefix.to_string(), NamespaceState::default());
+                let mut guard = this.inner.lock().await;
+                guard
+                    .ontology_states
+                    .insert(prefix.to_string(), NamespaceState::default());
             }
 
             update_types(&url, &this).await;
@@ -104,7 +121,7 @@ pub struct NsCompletionCtx<'a> {
 }
 
 #[async_trait::async_trait]
-impl<'a> CompletionProvider<NsCompletionCtx<'a>> for NamespaceCompletionProvider {
+impl<'a> CompletionProvider<NsCompletionCtx<'a>> for ArcedNamespaceCompletionProvider {
     async fn find_completions(&self, ctx: &NsCompletionCtx, range: Range) -> Vec<SimpleCompletion> {
         let triples = &ctx.triples;
 
@@ -118,19 +135,25 @@ impl<'a> CompletionProvider<NsCompletionCtx<'a>> for NamespaceCompletionProvider
             .filter(|x| x.span.contains(&ctx.location))
             .min_by_key(|x| x.span.end - x.span.start)
         {
+            let mut guard = self.inner.lock().await;
+            let NamespaceCompletionProvider {
+                ref mut ontology_states,
+                ref mut properties,
+                ref mut types,
+                shape_provider,
+                done,
+                ref mut provider,
+            } = guard.deref_mut();
             info!("Found triple {}", triple);
-            let props = self.properties.lock().await;
-            let types = self.types.lock().await;
-            let handler = self.provider.lock().await;
 
             if let Some(ty) = types.get(&triple.subject) {
                 info!(
                     "Found types {:?}",
                     ty.iter()
-                        .map(|x| handler.class(*x).as_str())
+                        .map(|x| provider.class(*x).as_str())
                         .collect::<Vec<_>>()
                 );
-                return props
+                return properties
                     .values()
                     .flatten()
                     .filter(|x| {
@@ -146,7 +169,7 @@ impl<'a> CompletionProvider<NsCompletionCtx<'a>> for NamespaceCompletionProvider
                     .flat_map(|x| x.into_completion(&ctx.turtle, range.clone()))
                     .collect();
             } else {
-                return props
+                return properties
                     .values()
                     .flatten()
                     .flat_map(|x| x.into_completion(&ctx.turtle, range.clone()))
@@ -167,7 +190,7 @@ pub struct NextTokenCompletionCtx<'a> {
     pub prev_token: &'a Token,
 }
 #[async_trait::async_trait]
-impl<'a> CompletionProvider<NextTokenCompletionCtx<'a>> for NamespaceCompletionProvider {
+impl<'a> CompletionProvider<NextTokenCompletionCtx<'a>> for ArcedNamespaceCompletionProvider {
     async fn find_completions(
         &self,
         ctx: &NextTokenCompletionCtx,
@@ -181,9 +204,15 @@ impl<'a> CompletionProvider<NextTokenCompletionCtx<'a>> for NamespaceCompletionP
 
         let triples = &ctx.triples;
 
-        let prov = self.provider.lock().await;
-        let types = self.types.lock().await;
-        let shape_provider = self.shape_provider.lock().await;
+        let mut guard = self.inner.lock().await;
+        let NamespaceCompletionProvider {
+            ref mut ontology_states,
+            ref mut properties,
+            ref mut types,
+            shape_provider,
+            done,
+            ref mut provider,
+        } = guard.deref_mut();
 
         let mut out = Vec::new();
 
@@ -221,18 +250,19 @@ impl<'a> CompletionProvider<NextTokenCompletionCtx<'a>> for NamespaceCompletionP
 
             if let Some(types) = types.get(&triple.subject) {
                 for ty in types {
-                    info!("This might be type {}", prov.class(*ty).as_str())
+                    info!("This might be type {}", provider.class(*ty).as_str())
                 }
 
                 types
                     .iter()
-                    .map(|ty| prov.class(*ty).as_str())
+                    .map(|ty| provider.class(*ty).as_str())
                     .for_each(|class| class_to_completion(class));
                 return out;
             }
         }
 
-        prov.classes
+        provider
+            .classes
             .iter()
             .flat_map(|x| {
                 if let Class::Named(x) = x {
@@ -247,13 +277,19 @@ impl<'a> CompletionProvider<NextTokenCompletionCtx<'a>> for NamespaceCompletionP
     }
 }
 
-async fn update_types(url: &str, this: &NamespaceCompletionProvider) {
-    let props = this.ontology_states.lock().await;
-    let state = props.get(url).unwrap();
+async fn update_types(url: &str, this: &ArcedNamespaceCompletionProvider) {
+    let mut guard = this.inner.lock().await;
+    let NamespaceCompletionProvider {
+        ref mut ontology_states,
+        ref mut properties,
+        ref mut types,
+        shape_provider: _,
+        done: _,
+        ref mut provider,
+    } = guard.deref_mut();
 
-    let mut provider = this.provider.lock().await;
-    let mut types = this.types.lock().await;
-    let props = this.properties.lock().await;
+    let state = ontology_states.get(url).unwrap();
+
     types.clear();
 
     for matched in state
@@ -265,13 +301,11 @@ async fn update_types(url: &str, this: &NamespaceCompletionProvider) {
 
         if let Some(ty) = matched.o().iri() {
             let class_id = provider.named(ty.as_str());
-            types
-                .deref_mut()
-                .insert(sub, provider.subclass_dict[class_id].clone());
+            types.insert(sub, provider.subclass_dict[class_id].clone());
         }
     }
 
-    for p in props.values().flatten() {
+    for p in properties.values().flatten() {
         for mat in state
             .triples
             .quads_matching(Any, [p.property.borrow_term()], Any, Any)
@@ -313,9 +347,7 @@ async fn update_types(url: &str, this: &NamespaceCompletionProvider) {
 
         if let Some(ty) = matched.o().iri() {
             let class_id = provider.named(ty.as_str());
-            types
-                .deref_mut()
-                .insert(sub, provider.subclass_dict[class_id].clone());
+            types.insert(sub, provider.subclass_dict[class_id].clone());
         }
     }
 
@@ -330,31 +362,34 @@ async fn update_types(url: &str, this: &NamespaceCompletionProvider) {
     }
 }
 
-async fn do_update(turtle: &Turtle, this: &NamespaceCompletionProvider, todo: &mut Vec<String>) {
+async fn do_update(
+    turtle: &Turtle,
+    this: &ArcedNamespaceCompletionProvider,
+    todo: &mut Vec<String>,
+) {
     let url = turtle.set_base.to_string();
     let state = NamespaceState::new(turtle);
 
-    {
-        let mut done = this.done.lock().await;
-        state.triples.imports(|x| {
-            if !done.contains(x.as_str()) {
-                done.insert(x.as_str().to_string());
-                todo.push(x.as_str().to_string());
-            }
-        })
-    }
+    let mut guard = this.inner.lock().await;
+    let NamespaceCompletionProvider {
+        ref mut ontology_states,
+        ref mut properties,
+        types: _,
+        ref mut shape_provider,
+        ref mut done,
+        ref mut provider,
+    } = guard.deref_mut();
 
-    let mut provider = this.provider.lock().await;
-    let mut shape_completion_provider = this.shape_provider.lock().await;
+    state.triples.imports(|x| {
+        if !done.contains(x.as_str()) {
+            done.insert(x.as_str().to_string());
+            todo.push(x.as_str().to_string());
+        }
+    });
 
     let mut new_props = vec![];
-    let properties = NsPropertyProvider.provide(&state.triples, provider.deref_mut());
-    new_props.extend(properties);
-    let properties = shape_completion_provider.provide(&state.triples, provider.deref_mut());
-    new_props.extend(properties);
-    let mut props = this.properties.lock().await;
-    props.insert(url.clone(), new_props);
-
-    let mut props = this.ontology_states.lock().await;
-    props.insert(url, state);
+    new_props.extend(NsPropertyProvider.provide(&state.triples, provider));
+    new_props.extend(shape_provider.provide(&state.triples, provider));
+    properties.insert(url.clone(), new_props);
+    ontology_states.insert(url, state);
 }

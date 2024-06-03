@@ -37,7 +37,9 @@ use crate::{
 };
 
 use self::{
-    completion::{CompletionProvider, NamespaceCompletionProvider},
+    completion::{
+        ArcedNamespaceCompletionProvider, CompletionProvider, NamespaceCompletionProvider,
+    },
     formatter::format_turtle,
     node::{Leaf, Node},
     token::Token,
@@ -61,11 +63,11 @@ pub struct TurtleLang {
     comments: Vec<Spanned<String>>,
     defined_prefixes: HashSet<String>,
     prefixes: Prefixes,
-    namespace_completion_provider: NamespaceCompletionProvider,
+    namespace_completion_provider: ArcedNamespaceCompletionProvider,
 }
 
 impl Lang for TurtleLang {
-    type State = (Prefixes, NamespaceCompletionProvider);
+    type State = (Prefixes, ArcedNamespaceCompletionProvider);
 
     type Token = token::Token;
 
@@ -258,7 +260,7 @@ impl Lang for TurtleLang {
                 comments: Vec::new(),
                 defined_prefixes: HashSet::new(),
                 prefixes: state.0.clone(),
-                namespace_completion_provider: NamespaceCompletionProvider::new(&state.1),
+                namespace_completion_provider: state.1.clone(),
             },
             CurrentLangState {
                 element: CurrentLangStatePart::new(spanned(Turtle::empty(&url), 0..1)),
